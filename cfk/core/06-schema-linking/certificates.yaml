@@ -1,0 +1,42 @@
+# Read-only Schema Registry cluster (id_schemaregistry-ro_confluent): the leader in the core (CN=sr-ro) receives the
+# schema link, the followers in the DMZ (CN=sr-dmz) only read its topic. Separate principals, so the DMZ pods get
+# read-only access to the read-only cluster's topic and nothing on the core registry.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: schemaregistry-ro
+  namespace: confluent
+spec:
+  commonName: sr-ro
+  subject: { organizations: [WF Demo], organizationalUnits: [schema-registry-ro] }
+  dnsNames:
+    - schemaregistry-ro
+    - schemaregistry-ro.confluent
+    - schemaregistry-ro.confluent.svc.cluster.local
+    - "*.schemaregistry-ro.confluent.svc.cluster.local"
+  usages: [server auth, client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: tls-schemaregistry-ro
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+# Copied to the DMZ cluster (gateway namespace) by cfk/dmz/02-schema-registry/deploy.sh.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: schemaregistry-dmz
+  namespace: confluent
+spec:
+  commonName: sr-dmz
+  subject: { organizations: [WF Demo], organizationalUnits: [schema-registry-dmz] }
+  dnsNames:
+    - schemaregistry-dmz
+    - schemaregistry-dmz.gateway
+    - schemaregistry-dmz.gateway.svc.cluster.local
+    - "*.schemaregistry-dmz.gateway.svc.cluster.local"
+    - ${SR_PUBLIC_HOST}
+  usages: [server auth, client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: tls-schemaregistry-dmz
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }

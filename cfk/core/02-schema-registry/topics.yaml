@@ -1,0 +1,41 @@
+# Avro topic for the Schema Registry and Gateway governance tests (demo-orders holds plain-text test records).
+apiVersion: platform.confluent.io/v1beta1
+kind: KafkaTopic
+metadata:
+  name: demo-payments
+  namespace: confluent
+spec:
+  replicas: 3
+  partitionCount: 6
+  configs:
+    min.insync.replicas: "2"
+  kafkaRestClassRef:
+    name: default
+---
+# Scratch topic for the data-contract client tests (enableAt, rule.executors._default_.disabled) away from demo-payments.
+apiVersion: platform.confluent.io/v1beta1
+kind: KafkaTopic
+metadata:
+  name: demo-csfle-test
+  namespace: confluent
+spec:
+  replicas: 3
+  partitionCount: 1
+  configs:
+    min.insync.replicas: "2"
+  kafkaRestClassRef:
+    name: default
+---
+# Used by checks/schema-registry.sh (registers a simple schema as alice); keeps demo-payments-value untouched.
+apiVersion: platform.confluent.io/v1beta1
+kind: KafkaTopic
+metadata:
+  name: demo-sr-check
+  namespace: confluent
+spec:
+  replicas: 3
+  partitionCount: 1
+  configs:
+    min.insync.replicas: "2"
+  kafkaRestClassRef:
+    name: default

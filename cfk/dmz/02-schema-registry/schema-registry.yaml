@@ -1,0 +1,88 @@
+# Public, read-only Schema Registry (schema linking). Followers of the read-only cluster id_schemaregistry-ro_confluent
+# in the core: they read its store topic over the core Kafka NLB, can never become leader, and serve the schemas the
+# exporter dmz-readonly copied there. Writes from the internet would be forwarded to the leader, which is in IMPORT
+# mode and gives users read roles only. No DEK registry, so keys are never served here.
+# Clients log in with LDAP basic auth (checked by MDS in the core); the pods authenticate as CN=sr-dmz (mTLS).
+apiVersion: platform.confluent.io/v1beta1
+kind: SchemaRegistry
+metadata:
+  name: schemaregistry-dmz
+  namespace: gateway
+  annotations:
+    # The DMZ operator has no MDS access; the role bindings live in cfk/core/06-schema-linking/rbac.yaml.
+    platform.confluent.io/disable-internal-rolebindings-creation: "true"
+spec:
+  replicas: 2
+  image:
+    application: confluentinc/cp-schema-registry:8.4.1
+    init: confluentinc/confluent-init-container:3.4.0
+  tls:
+    secretRef: tls-schemaregistry-dmz
+  authorization:
+    type: rbac
+  license:
+    secretRef: confluent-license
+  configOverrides:
+    server:
+      - leader.eligibility=false
+      - schema.registry.group.id=id_schemaregistry-ro_confluent
+      - kafkastore.topic=_schemas_schemaregistry-ro_confluent
+      # The ALB re-encrypts without SNI (health checks use the pod IP), which Jetty's SNI host check rejects.
+      - sni.host.check.enabled=false
+      # Rule sets are part of the schemas external serializers fetch. CFK sets this key to the RBAC extension only,
+      # so it has to stay first.
+      - schema.registry.resource.extension.class=io.confluent.kafka.schemaregistry.security.SchemaRegistrySecurityResourceExtension,io.confluent.kafka.schemaregistry.rulehandler.RuleSetResourceExtension
+      - confluent.license.addon.csfle=${file:/mnt/secrets/confluent-license/license.txt:license}
+  podTemplate:
+    resources:
+      requests: { cpu: 250m, memory: 1Gi }
+      limits: { memory: 2Gi }
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: schemaregistry-dmz
+  dependencies:
+    kafka:
+      bootstrapEndpoint: kafka.${PRIVATE_ZONE}:9092
+      authentication:
+        type: mtls
+        sslClientAuthentication: true
+      tls:
+        enabled: true
+    mds:
+      endpoint: https://mds.${PRIVATE_ZONE}:8090
+      # Public key only: followers verify MDS tokens, they never issue them.
+      tokenKeyPair:
+        secretRef: mds-token-public
+      authentication:
+        type: mtls
+        sslClientAuthentication: true
+      tls:
+        enabled: true
+---
+# Target of the public ALB (terraform/dmz/sr-alb.tf). The AWS Load Balancer Controller keeps the pod IPs registered.
+apiVersion: v1
+kind: Service
+metadata:
+  name: schemaregistry-dmz-alb
+  namespace: gateway
+spec:
+  type: ClusterIP
+  selector: { app: schemaregistry-dmz }
+  ports:
+    - { name: https, port: 8081, targetPort: 8081 }
+---
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: schemaregistry-dmz
+  namespace: gateway
+spec:
+  targetGroupARN: ${SR_TARGET_GROUP_ARN}
+  targetType: ip
+  serviceRef:
+    name: schemaregistry-dmz-alb
+    port: 8081

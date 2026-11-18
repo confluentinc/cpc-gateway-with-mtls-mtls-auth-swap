@@ -1,0 +1,3 @@
+# CFK 3.4.0 (chart confluentinc/confluent-for-kubernetes 0.2038.1)
+namespaced: true
+namespaceList: [confluent]

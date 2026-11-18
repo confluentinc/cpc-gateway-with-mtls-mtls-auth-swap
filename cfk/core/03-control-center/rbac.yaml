@@ -1,0 +1,42 @@
+# testadmin (LDAP group platform-admins) can see and manage the Kafka cluster and Schema Registry in Control Center.
+# alice keeps only her demo-* topic and subject bindings, so she sees a restricted view.
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: testadmin-kafka-clusteradmin
+  namespace: confluent
+spec:
+  principal: { type: user, name: testadmin }
+  role: ClusterAdmin
+  kafkaRestClassRef:
+    name: default
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: testadmin-sr-systemadmin
+  namespace: confluent
+spec:
+  principal: { type: user, name: testadmin }
+  role: SystemAdmin
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry_confluent
+  kafkaRestClassRef:
+    name: default
+---
+# C3 decodes Avro in the message browser as its own identity (User:c3), so it needs read on the subjects.
+# Which topics a user may browse is still enforced per user.
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: c3-demo-subjects-read
+  namespace: confluent
+spec:
+  principal: { type: user, name: c3 }
+  role: DeveloperRead
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry_confluent
+  resourcePatterns:
+    - { resourceType: Subject, name: demo-, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default

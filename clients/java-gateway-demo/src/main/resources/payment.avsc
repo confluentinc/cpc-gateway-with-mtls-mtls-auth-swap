@@ -1,0 +1,13 @@
+{
+  "type": "record",
+  "name": "Payment",
+  "namespace": "wf.demo",
+  "fields": [
+    { "name": "id", "type": "string" },
+    { "name": "amount", "type": "double" },
+    { "name": "currency", "type": "string", "default": "USD" },
+    { "name": "merchant", "type": "string", "default": "" },
+    { "name": "customer_name", "type": "string", "default": "", "confluent:tags": ["PII"] },
+    { "name": "card_number", "type": "string", "default": "", "confluent:tags": ["PII"] }
+  ]
+}

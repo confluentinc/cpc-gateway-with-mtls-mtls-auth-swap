@@ -1,0 +1,143 @@
+# Loki (single binary) for the broker and Gateway logs. 10-day retention, enforced by the compactor.
+# Volume: ~350 MB/day uncompressed from 3 brokers + 3 KRaft controllers + 3 Gateway pods, roughly 1 GB on disk for
+# 10 days after compression; the 20Gi volume leaves headroom for bursts (e.g. DEBUG logging).
+# Reached in-cluster at loki.logging.svc:3100 and from the DMZ VPC at loki.${PRIVATE_ZONE}:3100. No auth.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logging
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: logging
+data:
+  loki.yaml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9095
+      log_level: info
+
+    common:
+      instance_addr: 127.0.0.1
+      path_prefix: /loki
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+
+    schema_config:
+      configs:
+        - from: "2026-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+
+    limits_config:
+      retention_period: 240h
+      max_query_lookback: 240h
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+      ingestion_rate_mb: 4
+      ingestion_burst_size_mb: 8
+      per_stream_rate_limit: 2MB
+      per_stream_rate_limit_burst: 4MB
+      allow_structured_metadata: true
+      volume_enabled: true
+
+    compactor:
+      working_directory: /loki/compactor
+      compaction_interval: 10m
+      retention_enabled: true
+      retention_delete_delay: 2h
+      delete_request_store: filesystem
+
+    analytics:
+      reporting_enabled: false
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: loki
+  namespace: logging
+spec:
+  replicas: 1
+  serviceName: loki
+  selector:
+    matchLabels: { app: loki }
+  template:
+    metadata:
+      labels: { app: loki }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: loki
+          image: grafana/loki:3.7.9
+          args: [-config.file=/etc/loki/loki.yaml]
+          ports:
+            - { name: http, containerPort: 3100 }
+            - { name: grpc, containerPort: 9095 }
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            initialDelaySeconds: 15
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { memory: 2Gi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/loki }
+            - { name: data, mountPath: /loki }
+      volumes:
+        - name: config
+          configMap: { name: loki-config }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: gp3
+        resources:
+          requests: { storage: 20Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: logging
+spec:
+  selector: { app: loki }
+  ports:
+    - { name: http, port: 3100, targetPort: http }
+---
+# Internal NLB for the DMZ (Alloy push, Grafana queries). Only the DMZ VPC may connect.
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki-lb
+  namespace: logging
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
+    external-dns.alpha.kubernetes.io/hostname: loki.${PRIVATE_ZONE}
+spec:
+  type: LoadBalancer
+  loadBalancerClass: service.k8s.aws/nlb
+  loadBalancerSourceRanges:
+    - ${DMZ_VPC_CIDR}   # DMZ VPC
+  selector: { app: loki }
+  ports:
+    - { name: http, port: 3100, targetPort: http }

@@ -1,0 +1,91 @@
+# Schema Registry role bindings. The SR cluster ID is id_<name>_<namespace>.
+# bob intentionally has none (negative tests).
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: alice-demo-subjects-write
+  namespace: confluent
+spec:
+  principal: { type: user, name: alice }
+  role: DeveloperWrite
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry_confluent
+  resourcePatterns:
+    - { resourceType: Subject, name: demo-, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: alice-demo-subjects-read
+  namespace: confluent
+spec:
+  principal: { type: user, name: alice }
+  role: DeveloperRead
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry_confluent
+  resourcePatterns:
+    - { resourceType: Subject, name: demo-, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default
+---
+# The DEK registry extension keeps its keys in its own topic; CFK's internal bindings for User:sr don't cover it.
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: sr-dek-registry-topic
+  namespace: confluent
+spec:
+  principal: { type: user, name: sr }
+  role: ResourceOwner
+  resourcePatterns:
+    - { resourceType: Topic, name: _dek_registry_keys, patternType: LITERAL }
+  kafkaRestClassRef:
+    name: default
+---
+# Schema linking: the exporter keeps its configs and states in _exporter_configs and _exporter_states.
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: sr-schema-exporter-topics
+  namespace: confluent
+spec:
+  principal: { type: user, name: sr }
+  role: ResourceOwner
+  resourcePatterns:
+    - { resourceType: Topic, name: _exporter_, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default
+---
+# The DMZ Gateway's SR client (governance / schema validation): read-only on the governed subjects.
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: cpcgw-dmz-sr-client-demo-subjects-read
+  namespace: confluent
+spec:
+  principal: { type: user, name: cpcgw-dmz-sr-client }
+  role: DeveloperRead
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry_confluent
+  resourcePatterns:
+    - { resourceType: Subject, name: demo-, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default
+---
+# The Gateway runs the ENCRYPT rules: it reads the KEK and registers the DEKs it generates under it.
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: cpcgw-dmz-sr-client-payments-kek
+  namespace: confluent
+spec:
+  principal: { type: user, name: cpcgw-dmz-sr-client }
+  role: DeveloperWrite
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry_confluent
+  resourcePatterns:
+    - { resourceType: Kek, name: payments-kek, patternType: LITERAL }
+  kafkaRestClassRef:
+    name: default

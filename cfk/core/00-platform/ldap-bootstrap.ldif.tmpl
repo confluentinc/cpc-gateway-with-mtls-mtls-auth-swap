@@ -1,0 +1,91 @@
+dn: ou=users,dc=wf,dc=demo
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=groups,dc=wf,dc=demo
+objectClass: organizationalUnit
+ou: groups
+
+# Platform service principals (also the CNs of their certificates)
+dn: cn=kafka,ou=users,dc=wf,dc=demo
+objectClass: inetOrgPerson
+cn: kafka
+sn: service
+uid: kafka
+description: Kafka brokers / MDS
+userPassword: ${KAFKA_PASSWORD}
+
+dn: cn=sr,ou=users,dc=wf,dc=demo
+objectClass: inetOrgPerson
+cn: sr
+sn: service
+uid: sr
+description: Schema Registry
+userPassword: ${SR_PASSWORD}
+
+dn: cn=c3,ou=users,dc=wf,dc=demo
+objectClass: inetOrgPerson
+cn: c3
+sn: service
+uid: c3
+description: Control Center
+userPassword: ${C3_PASSWORD}
+
+# CPC Gateway's identity towards Schema Registry (data governance, read-only)
+dn: cn=cpcgw-dmz-sr-client,ou=users,dc=wf,dc=demo
+objectClass: inetOrgPerson
+cn: cpcgw-dmz-sr-client
+sn: service
+uid: cpcgw-dmz-sr-client
+description: CPC Gateway (DMZ) Schema Registry client
+userPassword: ${CPCGW_SR_PASSWORD}
+
+# Schema linking from the core registry to the read-only registry (writes only to the read-only cluster)
+dn: cn=sr-exporter,ou=users,dc=wf,dc=demo
+objectClass: inetOrgPerson
+cn: sr-exporter
+sn: service
+uid: sr-exporter
+description: Schema linking to the read-only Schema Registry
+userPassword: ${SR_EXPORTER_PASSWORD}
+
+# People
+dn: cn=testadmin,ou=users,dc=wf,dc=demo
+objectClass: inetOrgPerson
+cn: testadmin
+sn: admin
+uid: testadmin
+description: Platform administrator (Control Center)
+userPassword: ${TESTADMIN_PASSWORD}
+
+dn: cn=alice,ou=users,dc=wf,dc=demo
+objectClass: inetOrgPerson
+cn: alice
+sn: developer
+uid: alice
+description: Application developer (authorized on demo topics and subjects)
+userPassword: ${ALICE_PASSWORD}
+
+dn: cn=bob,ou=users,dc=wf,dc=demo
+objectClass: inetOrgPerson
+cn: bob
+sn: developer
+uid: bob
+description: Application developer (no role bindings; used for negative tests)
+userPassword: ${BOB_PASSWORD}
+
+# Groups (RBAC can bind Group:<cn>)
+dn: cn=platform-admins,ou=groups,dc=wf,dc=demo
+objectClass: groupOfNames
+cn: platform-admins
+member: cn=testadmin,ou=users,dc=wf,dc=demo
+
+dn: cn=app-developers,ou=groups,dc=wf,dc=demo
+objectClass: groupOfNames
+cn: app-developers
+member: cn=alice,ou=users,dc=wf,dc=demo
+
+dn: cn=gateway-services,ou=groups,dc=wf,dc=demo
+objectClass: groupOfNames
+cn: gateway-services
+member: cn=cpcgw-dmz-sr-client,ou=users,dc=wf,dc=demo

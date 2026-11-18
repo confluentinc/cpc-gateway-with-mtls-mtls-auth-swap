@@ -1,0 +1,20 @@
+# Internal NLB for MDS, so the DMZ Schema Registry can check LDAP basic auth and RBAC. A plain Service next to the
+# Kafka CR (like loki-lb), so the brokers aren't restarted. Only the DMZ private subnets may connect; the brokers'
+# certificate already covers *.${PRIVATE_ZONE}.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mds-lb
+  namespace: confluent
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
+    external-dns.alpha.kubernetes.io/hostname: mds.${PRIVATE_ZONE}
+spec:
+  type: LoadBalancer
+  loadBalancerClass: service.k8s.aws/nlb
+  loadBalancerSourceRanges: ${DMZ_PRIVATE_CIDRS_YAML}   # DMZ private subnets
+  selector: { app: kafka, type: kafka }
+  ports:
+    - { name: mds, port: 8090, targetPort: 8090 }

@@ -1,0 +1,142 @@
+# Grafana Alloy: tails the CPC Gateway logs through the Kubernetes API and pushes them to the core Loki
+# (internal NLB loki.${PRIVATE_ZONE}:3100, allowed by the DMZ private NACL rule 120).
+# Labels: cluster=dmz, namespace, pod, container, app (cpcgw-dmz), level.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: alloy-logs
+  namespace: gateway
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: alloy-logs
+  namespace: gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: alloy-logs
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: monitoring
+data:
+  config.alloy: |
+    discovery.kubernetes "pods" {
+      role = "pod"
+      namespaces {
+        names = ["gateway"]
+      }
+      selectors {
+        role  = "pod"
+        label = "app=cpcgw-dmz"
+      }
+    }
+
+    discovery.relabel "pods" {
+      targets = discovery.kubernetes.pods.targets
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_init"]
+        regex         = "true"
+        action        = "drop"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+      }
+    }
+
+    loki.source.kubernetes "pods" {
+      targets    = discovery.relabel.pods.output
+      forward_to = [loki.process.gateway.receiver]
+    }
+
+    // Lines look like: 2026-11-12 15:14:25 INFO  <thread> logger - message {key=value, ...}
+    loki.process "gateway" {
+      stage.multiline {
+        firstline     = "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} "
+        max_wait_time = "3s"
+      }
+      stage.regex {
+        expression = "^\\S+ \\S+ (?P<level>[A-Z]+) "
+      }
+      stage.labels {
+        values = { level = "" }
+      }
+      stage.static_labels {
+        values = { cluster = "dmz" }
+      }
+      forward_to = [loki.write.default.receiver]
+    }
+
+    loki.write "default" {
+      endpoint {
+        url = "http://loki.${PRIVATE_ZONE}:3100/loki/api/v1/push"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alloy
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: alloy }
+  template:
+    metadata:
+      labels: { app: alloy }
+    spec:
+      serviceAccountName: alloy
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.21.3
+          args:
+            - run
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --storage.path=/var/lib/alloy/data
+            - /etc/alloy/config.alloy
+          ports:
+            - { name: http, containerPort: 12345 }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: http }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/alloy }
+            - { name: data, mountPath: /var/lib/alloy/data }
+      volumes:
+        - name: config
+          configMap: { name: alloy-config }
+        - name: data
+          emptyDir: {}

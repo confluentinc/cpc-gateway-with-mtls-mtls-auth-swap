@@ -1,0 +1,233 @@
+# All leaf certificates are signed by ClusterIssuer wf-demo-ca. The broker principal mapping takes the CN,
+# so each CN is the principal used in RBAC (kafka, sr, c3, alice, cpcgw-dmz-client, ...).
+# ---------------------------------------------------------------------------- Platform components
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kafka
+  namespace: confluent
+spec:
+  commonName: kafka
+  subject: { organizations: [WF Demo], organizationalUnits: [kafka-broker] }
+  dnsNames:
+    - kafka
+    - kafka.confluent
+    - kafka.confluent.svc.cluster.local
+    - "*.kafka.confluent.svc.cluster.local"
+    - "*.confluent.svc.cluster.local"
+    - kafka.${PRIVATE_ZONE}
+    - "*.${PRIVATE_ZONE}"
+  usages: [server auth, client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: tls-kafka
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kraftcontroller
+  namespace: confluent
+spec:
+  commonName: kraftcontroller
+  subject: { organizations: [WF Demo], organizationalUnits: [kafka-controller] }
+  dnsNames:
+    - kraftcontroller
+    - kraftcontroller.confluent
+    - kraftcontroller.confluent.svc.cluster.local
+    - "*.kraftcontroller.confluent.svc.cluster.local"
+  usages: [server auth, client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: tls-kraftcontroller
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: schemaregistry
+  namespace: confluent
+spec:
+  commonName: sr
+  subject: { organizations: [WF Demo], organizationalUnits: [schema-registry] }
+  dnsNames:
+    - schemaregistry
+    - schemaregistry.confluent
+    - schemaregistry.confluent.svc.cluster.local
+    - "*.schemaregistry.confluent.svc.cluster.local"
+    - sr.${PRIVATE_ZONE}
+  usages: [server auth, client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: tls-schemaregistry
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: controlcenter
+  namespace: confluent
+spec:
+  commonName: c3
+  subject: { organizations: [WF Demo], organizationalUnits: [control-center] }
+  dnsNames:
+    - controlcenter
+    - controlcenter.confluent
+    - controlcenter.confluent.svc.cluster.local
+    - "*.controlcenter.confluent.svc.cluster.local"
+    # C3's Jetty rejects requests whose SNI isn't in the certificate ("400 Invalid SNI"); needed for port-forward.
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  usages: [server auth, client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: tls-controlcenter
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ldap
+  namespace: confluent
+spec:
+  commonName: ldap
+  subject: { organizations: [WF Demo], organizationalUnits: [directory] }
+  dnsNames:
+    - ldap
+    - ldap.confluent
+    - ldap.confluent.svc.cluster.local
+    - ldap-0.ldap.confluent.svc.cluster.local
+  usages: [server auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: ldap-sslcerts
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+# ---------------------------------------------------------------------------- Control Center next-gen metrics (Prometheus, Alertmanager)
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: prometheus
+  namespace: confluent
+spec:
+  commonName: prometheus
+  subject: { organizations: [WF Demo], organizationalUnits: [c3-prometheus] }
+  dnsNames:
+    - controlcenter
+    - controlcenter.confluent
+    - controlcenter.confluent.svc.cluster.local
+    - "*.controlcenter.confluent.svc.cluster.local"
+  usages: [server auth, client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: prometheus-tls
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: prometheus-client
+  namespace: confluent
+spec:
+  commonName: prometheus-client
+  subject: { organizations: [WF Demo], organizationalUnits: [c3-prometheus-client] }
+  usages: [client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: prometheus-client-tls
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: alertmanager
+  namespace: confluent
+spec:
+  commonName: alertmanager
+  subject: { organizations: [WF Demo], organizationalUnits: [c3-alertmanager] }
+  dnsNames:
+    - controlcenter
+    - controlcenter.confluent
+    - controlcenter.confluent.svc.cluster.local
+    - "*.controlcenter.confluent.svc.cluster.local"
+  usages: [server auth, client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: alertmanager-tls
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: alertmanager-client
+  namespace: confluent
+spec:
+  commonName: alertmanager-client
+  subject: { organizations: [WF Demo], organizationalUnits: [c3-alertmanager-client] }
+  usages: [client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: alertmanager-client-tls
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+# ---------------------------------------------------------------------------- CPC Gateway (copied to the DMZ in step 7)
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cpcgw-dmz-server
+  namespace: confluent
+spec:
+  commonName: ${GATEWAY_DOMAIN}
+  subject: { organizations: [WF Demo], organizationalUnits: [cpc-gateway-server] }
+  dnsNames:
+    - ${GATEWAY_DOMAIN}
+    - "*.${GATEWAY_DOMAIN}"
+  usages: [server auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: cpcgw-dmz-server-tls
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cpcgw-dmz-client
+  namespace: confluent
+spec:
+  commonName: cpcgw-dmz-client
+  subject: { organizations: [WF Demo], organizationalUnits: [cpc-gateway-client] }
+  usages: [client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: cpcgw-dmz-client-tls
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+# ---------------------------------------------------------------------------- Test clients
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: client-alice
+  namespace: confluent
+spec:
+  commonName: alice
+  subject: { organizations: [WF Demo], organizationalUnits: [app-client] }
+  usages: [client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: client-alice-tls
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: client-bob
+  namespace: confluent
+spec:
+  commonName: bob
+  subject: { organizations: [WF Demo], organizationalUnits: [app-client] }
+  usages: [client auth, digital signature, key encipherment]
+  duration: 8760h
+  privateKey: { algorithm: RSA, size: 2048 }
+  secretName: client-bob-tls
+  issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }

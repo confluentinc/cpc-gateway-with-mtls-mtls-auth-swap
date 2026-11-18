@@ -1,0 +1,77 @@
+# Schema Registry: 2 replicas in different AZs, RBAC. Clients use HTTP basic auth with their LDAP username and
+# password (checked by MDS). SR itself authenticates to Kafka and MDS with its mTLS certificate (User:sr).
+apiVersion: platform.confluent.io/v1beta1
+kind: SchemaRegistry
+metadata:
+  name: schemaregistry
+  namespace: confluent
+spec:
+  replicas: 2
+  oneReplicaPerNode: true
+  image:
+    application: confluentinc/cp-schema-registry:8.4.1
+    init: confluentinc/confluent-init-container:3.4.0
+  tls:
+    secretRef: tls-schemaregistry
+  authorization:
+    type: rbac
+  # Enterprise license with the CSFLE add-on; SR rejects ENCRYPT rules (HTTP 402) without it.
+  license:
+    secretRef: confluent-license
+  # Schema linking: key that encrypts the destination credentials stored in exporter configs.
+  mountedSecrets:
+    - secretRef: sr-password-encoder
+  internalTopicReplicatorFactor: 3
+  configOverrides:
+    server:
+      # Data contracts: rule sets (CEL, ENCRYPT), the DEK registry for Gateway field encryption, and the schema
+      # exporter (schema linking to the read-only registry). CFK sets this
+      # key to the RBAC security extension only, so it has to stay first in the list.
+      - schema.registry.resource.extension.class=io.confluent.kafka.schemaregistry.security.SchemaRegistrySecurityResourceExtension,io.confluent.kafka.schemaregistry.rulehandler.RuleSetResourceExtension,io.confluent.dekregistry.DekRegistryResourceExtension,io.confluent.schema.exporter.SchemaExporterResourceExtension
+      - kafkastore.update.handlers=io.confluent.schema.exporter.storage.SchemaExporterUpdateHandler
+      - password.encoder.secret=${file:/mnt/secrets/sr-password-encoder/password-encoder.txt:password}
+      # Without this the RBAC filter has no operation mapping for /dek-registry and denies every caller.
+      - dek.registry.rbac.enable=true
+      # The rule handler checks the CSFLE add-on under its own key; same JWT as spec.license.
+      - confluent.license.addon.csfle=${file:/mnt/secrets/confluent-license/license.txt:license}
+  externalAccess:
+    type: loadBalancer
+    loadBalancer:
+      domain: ${PRIVATE_ZONE}
+      prefix: sr
+      port: 443
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+        service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+        service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
+      loadBalancerSourceRanges:
+        - ${CORE_VPC_CIDR}
+        - ${DMZ_VPC_CIDR}
+  podTemplate:
+    resources:
+      requests: { cpu: 250m, memory: 1Gi }
+      limits: { memory: 2Gi }
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: schemaregistry
+  dependencies:
+    kafka:
+      bootstrapEndpoint: kafka.confluent.svc.cluster.local:9071
+      authentication:
+        type: mtls
+        sslClientAuthentication: true
+      tls:
+        enabled: true
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token
+      authentication:
+        type: mtls
+        sslClientAuthentication: true
+      tls:
+        enabled: true

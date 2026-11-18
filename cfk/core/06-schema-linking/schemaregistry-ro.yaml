@@ -1,0 +1,52 @@
+# Leader of the read-only Schema Registry cluster. It is the target of the schema link from the core registry and the
+# only member allowed to become leader; the DMZ followers (cfk/dmz/04-schema-registry) join the same cluster through
+# Kafka and serve the external clients. In IMPORT mode, so only the exporter writes to it. No external access.
+apiVersion: platform.confluent.io/v1beta1
+kind: SchemaRegistry
+metadata:
+  name: schemaregistry-ro
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-schema-registry:8.4.1
+    init: confluentinc/confluent-init-container:3.4.0
+  tls:
+    secretRef: tls-schemaregistry-ro
+  authorization:
+    type: rbac
+  license:
+    secretRef: confluent-license
+  internalTopicReplicatorFactor: 3
+  configOverrides:
+    server:
+      # Port-forwarded admin calls (IMPORT mode) use the service name over localhost.
+      - sni.host.check.enabled=false
+      # Rule sets travel with the linked schemas. The exporter also copies KEKs and DEKs, so the leader has a DEK
+      # registry on its own topic (never the core's _dek_registry_keys); the DMZ followers don't load it, so keys
+      # aren't served to external clients.
+      - schema.registry.resource.extension.class=io.confluent.kafka.schemaregistry.security.SchemaRegistrySecurityResourceExtension,io.confluent.kafka.schemaregistry.rulehandler.RuleSetResourceExtension,io.confluent.dekregistry.DekRegistryResourceExtension
+      - dek.registry.topic=_dek_registry_keys_ro
+      - dek.registry.rbac.enable=true
+      - confluent.license.addon.csfle=${file:/mnt/secrets/confluent-license/license.txt:license}
+  podTemplate:
+    resources:
+      requests: { cpu: 250m, memory: 1Gi }
+      limits: { memory: 2Gi }
+  dependencies:
+    kafka:
+      bootstrapEndpoint: kafka.confluent.svc.cluster.local:9071
+      authentication:
+        type: mtls
+        sslClientAuthentication: true
+      tls:
+        enabled: true
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token
+      authentication:
+        type: mtls
+        sslClientAuthentication: true
+      tls:
+        enabled: true
