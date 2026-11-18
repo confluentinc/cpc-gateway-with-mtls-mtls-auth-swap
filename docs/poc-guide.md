@@ -73,7 +73,7 @@ for the schema registry. The Gateway has two identities of its own. All role bin
 So for Kafka, the client's own role bindings don't apply through the Gateway. The Gateway's principal is what the
 brokers authorize, and the CA (plus the IP allowlist) decides who may use the Gateway at all. To keep two external
 applications apart at the brokers, give each its own route and streaming domain with its own upstream certificate
-(and principal).
+(and principal); untested here.
 
 **Schema Registry**
 
