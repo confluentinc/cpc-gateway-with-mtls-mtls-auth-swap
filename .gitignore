@@ -1,0 +1,21 @@
+# Local settings and generated secrets (passwords, keys, client stores, license)
+config.env
+.secrets/
+
+# Terraform state and generated inputs
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+config.auto.tfvars.json
+crash.log
+*.log
+
+# Build output, editor and OS files
+target/
+.idea/
+.vscode/
+.DS_Store
+
+# Local clone of github.com/confluentinc/confluent-kubernetes-examples (reference only)
+confluent-kubernetes-examples/

@@ -1,0 +1,77 @@
+# Control Center (next-gen) with its embedded Prometheus and Alertmanager, all mTLS. RBAC: users log in with their
+# LDAP username and password (checked by MDS). Not exposed outside the cluster; reach it with kubectl port-forward.
+# The name must stay "controlcenter": the Kafka and KRaft metricsClient point at controlcenter.confluent.svc:9090.
+apiVersion: platform.confluent.io/v1beta1
+kind: ControlCenter
+metadata:
+  name: controlcenter
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-enterprise-control-center-next-gen:2.7.0
+    init: confluentinc/confluent-init-container:3.4.0
+  dataVolumeCapacity: 10Gi
+  authorization:
+    type: rbac
+  tls:
+    secretRef: tls-controlcenter
+  podTemplate:
+    resources:
+      requests: { cpu: 500m, memory: 2Gi }
+      limits: { memory: 4Gi }
+  dependencies:
+    kafka:
+      bootstrapEndpoint: kafka.confluent.svc.cluster.local:9071
+      authentication:
+        type: mtls
+        sslClientAuthentication: true
+      tls:
+        enabled: true
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token
+      authentication:
+        type: mtls
+        sslClientAuthentication: true
+      tls:
+        enabled: true
+    # SR only accepts LDAP basic auth; without credentials C3's health check gets 401 and marks SR "down".
+    schemaRegistry:
+      url: https://schemaregistry.confluent.svc.cluster.local:8081
+      authentication:
+        type: basic
+        basic:
+          secretRef: c3-sr-basic
+      tls:
+        enabled: true
+    prometheusClient:
+      url: https://controlcenter.confluent.svc.cluster.local:9090
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
+        secretRef: prometheus-client-tls
+    alertManagerClient:
+      url: https://controlcenter.confluent.svc.cluster.local:9093
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
+        secretRef: alertmanager-client-tls
+  services:
+    prometheus:
+      image: confluentinc/cp-enterprise-prometheus:2.7.0
+      authentication:
+        type: mtls
+      tls:
+        secretRef: prometheus-tls
+      pvc:
+        dataVolumeCapacity: 20Gi
+    alertmanager:
+      image: confluentinc/cp-enterprise-alertmanager:2.7.0
+      authentication:
+        type: mtls
+      tls:
+        secretRef: alertmanager-tls

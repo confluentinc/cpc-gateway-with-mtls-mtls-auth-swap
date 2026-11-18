@@ -1,0 +1,123 @@
+# Role bindings for the read-only Schema Registry cluster id_schemaregistry-ro_confluent. CFK creates the leader's own
+# bindings (User:sr-ro); the DMZ followers get theirs here because the DMZ operator can't reach MDS.
+# Users only get read roles on this cluster; the public ALB also refuses every write.
+#
+# ---------------------------------------------------------------------------- DMZ followers (User:sr-dmz)
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: sr-dmz-ro-cluster
+  namespace: confluent
+spec:
+  principal: { type: user, name: sr-dmz }
+  role: SecurityAdmin
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry-ro_confluent
+  kafkaRestClassRef:
+    name: default
+---
+# What CFK would create for a member of this cluster: its store topic and group. Every member, including a follower,
+# writes a no-op record to the store topic at startup to find the end offset. Only the read-only cluster's topic.
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: sr-dmz-ro-store
+  namespace: confluent
+spec:
+  principal: { type: user, name: sr-dmz }
+  role: ResourceOwner
+  resourcePatterns:
+    - { resourceType: Topic, name: _schemas_schemaregistry-ro_confluent, patternType: LITERAL }
+    - { resourceType: Group, name: id_schemaregistry-ro_confluent, patternType: LITERAL }
+  kafkaRestClassRef:
+    name: default
+---
+# License topics (license check at startup).
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: sr-dmz-license-read
+  namespace: confluent
+spec:
+  principal: { type: user, name: sr-dmz }
+  role: DeveloperRead
+  resourcePatterns:
+    - { resourceType: Topic, name: _confluent-license, patternType: LITERAL }
+    - { resourceType: Topic, name: _confluent-command, patternType: LITERAL }
+  kafkaRestClassRef:
+    name: default
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: sr-dmz-license-write
+  namespace: confluent
+spec:
+  principal: { type: user, name: sr-dmz }
+  role: DeveloperWrite
+  resourcePatterns:
+    - { resourceType: Topic, name: _confluent-license, patternType: LITERAL }
+    - { resourceType: Topic, name: _confluent-command, patternType: LITERAL }
+  kafkaRestClassRef:
+    name: default
+---
+# ---------------------------------------------------------------------------- Schema link (LDAP user sr-exporter)
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: sr-exporter-ro-subjects
+  namespace: confluent
+spec:
+  principal: { type: user, name: sr-exporter }
+  role: ResourceOwner
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry-ro_confluent
+  resourcePatterns:
+    - { resourceType: Subject, name: "*", patternType: LITERAL }
+    - { resourceType: Kek, name: "*", patternType: LITERAL }
+  kafkaRestClassRef:
+    name: default
+---
+# The leader's DEK registry topic (copied KEKs and wrapped DEKs).
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: sr-ro-dek-registry-topic
+  namespace: confluent
+spec:
+  principal: { type: user, name: sr-ro }
+  role: ResourceOwner
+  resourcePatterns:
+    - { resourceType: Topic, name: _dek_registry_keys_ro, patternType: LITERAL }
+  kafkaRestClassRef:
+    name: default
+---
+# ---------------------------------------------------------------------------- Users (read-only)
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: alice-ro-demo-subjects-read
+  namespace: confluent
+spec:
+  principal: { type: user, name: alice }
+  role: DeveloperRead
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry-ro_confluent
+  resourcePatterns:
+    - { resourceType: Subject, name: demo-, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default
+---
+# Admin access for setting IMPORT mode and checks; from the internet the ALB still refuses writes.
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: testadmin-ro-systemadmin
+  namespace: confluent
+spec:
+  principal: { type: user, name: testadmin }
+  role: SystemAdmin
+  clustersScopeByIds:
+    schemaRegistryClusterId: id_schemaregistry-ro_confluent
+  kafkaRestClassRef:
+    name: default

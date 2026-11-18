@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confluent Platform on Amazon EKS · CPC Gateway DMZ architecture</title>
+<style>
+  #cfk-arch {
+    --bg: #0a1120; --panel: #0f1a30; --card: #14213b; --card-stroke: #2a3b61; --card-hover: #4c6fff;
+    --text: #e9eefb; --muted: #9aabcc; --faint: #5d6f95;
+    --kafka: #38bdf8; --sr: #34d399; --gov: #c084fc; --deny: #f87171; --app: #fbbf24; --kms: #f472b6;
+    --cloud: #c9d3e6; --region: #12b5b0; --vpc: #9a6bff; --pub: #8fbf26; --priv: #12b5b0; --eks: #ff8a1f; --az: #3b4d77;
+    --btn: #18264a; --btn-on: #2b4cff; --btn-text: #dbe4ff;
+  }
+  #cfk-arch[data-theme="light"] {
+    --bg: #f4f6fb; --panel: #ffffff; --card: #ffffff; --card-stroke: #d3dbeb; --card-hover: #2b4cff;
+    --text: #0f1b33; --muted: #52607c; --faint: #9aa6bf;
+    --kafka: #0284c7; --sr: #059669; --gov: #9333ea; --deny: #dc2626; --app: #d97706; --kms: #db2777;
+    --cloud: #232f3e; --region: #00a4a6; --vpc: #8c4fff; --pub: #7aa116; --priv: #00a4a6; --eks: #ed7100; --az: #c3cde0;
+    --btn: #e8edf7; --btn-on: #173361; --btn-text: #1b2a4a;
+  }
+  html, body { margin: 0; height: 100%; }
+  body { background: #0a1120; }
+  body:has(#cfk-arch[data-theme="light"]) { background: #f4f6fb; }
+  #cfk-arch {
+    font-family: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh; box-sizing: border-box;
+    padding: 20px 28px 16px; display: flex; flex-direction: column; gap: 12px;
+    transition: background .3s, color .3s;
+  }
+  #cfk-arch * { box-sizing: border-box; }
+  #cfk-arch .top { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+  #cfk-arch .brand { display: flex; align-items: center; gap: 14px; }
+  #cfk-arch .brand .logo { height: 30px; }
+  #cfk-arch .brand .aws { height: 34px; border-radius: 4px; }
+  #cfk-arch .brand .sep { width: 1px; height: 32px; background: var(--card-stroke); }
+  #cfk-arch[data-theme="dark"] .logo-light, #cfk-arch[data-theme="light"] .logo-dark { display: none; }
+  #cfk-arch .titles { flex: 1; min-width: 320px; }
+  #cfk-arch h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  #cfk-arch .titles p { margin: 3px 0 0; color: var(--muted); font-size: 13.5px; }
+  #cfk-arch .controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  #cfk-arch .seg { display: flex; background: var(--btn); border-radius: 10px; padding: 3px; gap: 2px; }
+  #cfk-arch button {
+    font: inherit; font-size: 12.5px; font-weight: 500; border: 0; cursor: pointer; color: var(--btn-text);
+    background: transparent; padding: 7px 11px; border-radius: 8px; transition: background .2s, color .2s;
+  }
+  #cfk-arch .seg button[aria-pressed="true"] { background: var(--btn-on); color: #fff; }
+  #cfk-arch .tool { background: var(--btn); }
+  #cfk-arch .tool:hover, #cfk-arch .seg button:hover { outline: 1px solid var(--card-stroke); }
+  #cfk-arch .stage { position: relative; flex: 1; min-height: 0; }
+  #cfk-arch svg#diagram { width: 100%; height: auto; max-height: calc(100vh - 300px); display: block; margin: 0 auto; }
+  #cfk-arch:fullscreen svg#diagram { max-height: calc(100vh - 200px); }
+
+  #cfk-arch .t-title { font-size: 12.5px; font-weight: 600; fill: var(--text); }
+  #cfk-arch .t-sub { font-size: 10.5px; fill: var(--muted); }
+  #cfk-arch .t-group { font-size: 13px; font-weight: 600; fill: var(--text); }
+  #cfk-arch .t-col { font-size: 9.5px; font-weight: 600; letter-spacing: .08em; fill: var(--faint); }
+  #cfk-arch .t-az { font-size: 9.5px; font-weight: 500; fill: var(--faint); }
+  #cfk-arch .t-lane { font-size: 10px; font-weight: 500; fill: var(--muted); }
+  #cfk-arch .t-mini { font-size: 10.5px; font-weight: 500; fill: var(--muted); }
+  #cfk-arch .t-deny { font-size: 10px; font-weight: 600; fill: var(--deny); }
+  #cfk-arch .t-tile { font-size: 11px; font-weight: 700; fill: #173361; }
+
+  #cfk-arch .card { fill: var(--card); stroke: var(--card-stroke); stroke-width: 1; transition: stroke .2s; }
+  #cfk-arch .tile { fill: #ffffff; stroke: rgba(15, 27, 51, .08); }
+  #cfk-arch .node { cursor: default; outline: none; }
+  #cfk-arch .node:hover .card, #cfk-arch .node:focus .card { stroke: var(--card-hover); stroke-width: 1.6; }
+  #cfk-arch .chip rect { fill: var(--btn); stroke: var(--card-stroke); }
+  #cfk-arch .chip text { font-size: 10px; font-weight: 500; fill: var(--muted); }
+
+  #cfk-arch .lane { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
+  #cfk-arch .lane.kafka { stroke: var(--kafka); }
+  #cfk-arch .lane.sr { stroke: var(--sr); }
+  #cfk-arch .lane.gov { stroke: var(--gov); stroke-dasharray: 5 5; }
+  #cfk-arch .dot.kafka { fill: var(--kafka); }
+  #cfk-arch .dot.sr { fill: var(--sr); }
+  #cfk-arch .dot.gov { fill: var(--gov); }
+  #cfk-arch .t-ep { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 10.3px; font-weight: 600; fill: var(--text); }
+  #cfk-arch .t-ep-tag { font-size: 8.5px; font-weight: 700; letter-spacing: .08em; }
+  #cfk-arch .ep-box { fill: var(--panel); stroke-width: 1.6; }
+  #cfk-arch .ep-pulse { fill: none; stroke-width: 1.5; animation: cfk-pulse 2.6s ease-out infinite; }
+  @keyframes cfk-pulse { 0% { stroke-width: 1.5; opacity: .8; } 100% { stroke-width: 14; opacity: 0; } }
+  #cfk-arch .endpoints { display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; }
+  #cfk-arch .endpoints .ep {
+    display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--card-stroke); border-left: 3px solid var(--c); flex: 1; min-width: 260px;
+  }
+  #cfk-arch .endpoints .ep span { font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--c); }
+  #cfk-arch .endpoints .ep code { font-family: "SF Mono", Menlo, monospace; font-size: 13.5px; font-weight: 600; color: var(--text); }
+  #cfk-arch .endpoints .ep small { font-size: 11.5px; color: var(--muted); }
+  #cfk-arch .lane.app { stroke: var(--app); }
+  #cfk-arch .dot.app { fill: var(--app); }
+  #cfk-arch .lane.kms { stroke: var(--kms); }
+  #cfk-arch .dot.kms { fill: var(--kms); }
+  #cfk-arch .lane.link { stroke: var(--sr); stroke-dasharray: 2 5; }
+  #cfk-arch .dot.link { fill: var(--sr); }
+  #cfk-arch .halo { opacity: .22; }
+  #cfk-arch .firewall { stroke: var(--deny); stroke-width: 1.5; stroke-dasharray: 2 6; opacity: .45; fill: none; }
+
+  #cfk-arch [data-tags] { transition: opacity .45s ease; }
+  #cfk-arch .dim { opacity: .13; }
+  #cfk-arch .blocked { opacity: 0; pointer-events: none; transition: opacity .45s ease; }
+  #cfk-arch[data-mode="security"] .blocked { opacity: 1; }
+  #cfk-arch[data-mode="security"] .firewall { opacity: 1; }
+
+  #cfk-arch .fade { animation: cfk-fade .7s ease both; }
+  @keyframes cfk-fade { from { opacity: 0; } to { opacity: 1; } }
+
+  #cfk-arch .tip {
+    position: absolute; max-width: 320px; background: var(--panel); border: 1px solid var(--card-stroke);
+    border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.45; color: var(--text);
+    pointer-events: none; z-index: 5;
+  }
+  #cfk-arch .tip strong { display: block; font-weight: 600; margin-bottom: 3px; }
+  #cfk-arch .tip span { color: var(--muted); }
+
+  #cfk-arch .caption {
+    display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 18px; align-items: start;
+    background: var(--panel); border: 1px solid var(--card-stroke); border-radius: 12px; padding: 12px 16px;
+  }
+  #cfk-arch .caption h2 { font-size: 14.5px; font-weight: 600; margin: 0; display: flex; gap: 8px; align-items: center; }
+  #cfk-arch .caption .swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #cfk-arch .caption ol { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px 18px; counter-reset: step; }
+  #cfk-arch .caption li { font-size: 12.5px; line-height: 1.45; color: var(--muted); padding-left: 26px; position: relative; counter-increment: step; }
+  #cfk-arch .caption li::before {
+    content: counter(step); position: absolute; left: 0; top: 0; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--btn); color: var(--text); font-size: 10.5px; font-weight: 600; display: grid; place-items: center;
+  }
+  #cfk-arch .caption li b { color: var(--text); font-weight: 600; }
+  #cfk-arch .caption code { font-family: "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--text); }
+  #cfk-arch .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); align-items: center; }
+  #cfk-arch .legend i { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid; vertical-align: middle; margin-right: 6px; }
+  #cfk-arch .legend .push { margin-left: auto; }
+  @media (prefers-reduced-motion: reduce) {
+    #cfk-arch .fade { animation: none; }
+    #cfk-arch .dots, #cfk-arch .ep-pulse { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="cfk-arch" data-theme="dark" data-mode="all">
+  <header class="top">
+    <div class="brand">
+      <img class="logo logo-dark" src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjxzdmcgeG1sbnM6ZGM9Imh0dHA6Ly9wdXJsLm9yZy9kYy9lbGVtZW50cy8xLjEvIiB4bWxuczpjYz0iaHR0cDovL2NyZWF0aXZlY29tbW9ucy5vcmcvbnMjIiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiIHhtbG5zOnN2Zz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6c29kaXBvZGk9Imh0dHA6Ly9zb2RpcG9kaS5zb3VyY2Vmb3JnZS5uZXQvRFREL3NvZGlwb2RpLTAuZHRkIiB4bWxuczppbmtzY2FwZT0iaHR0cDovL3d3dy5pbmtzY2FwZS5vcmcvbmFtZXNwYWNlcy9pbmtzY2FwZSIgd2lkdGg9IjIxMjAiIGhlaWdodD0iNDEwIiB2aWV3Qm94PSIwIDAgMjEyIDQxIiB2ZXJzaW9uPSIxLjEiIHNvZGlwb2RpOmRvY25hbWU9InN2Z3ZpZXdlci1vdXRwdXQoMTEpLnN2ZyIgaW5rc2NhcGU6dmVyc2lvbj0iMS4wLjIgKGU4NmM4NzA4NzksIDIwMjEtMDEtMTUpIj4KICA8ZGVmcy8+CiAgPHNvZGlwb2RpOm5hbWVkdmlldyBwYWdlY29sb3I9IiNmZmZmZmYiIGJvcmRlcmNvbG9yPSIjNjY2NjY2IiBib3JkZXJvcGFjaXR5PSIxIiBvYmplY3R0b2xlcmFuY2U9IjEwIiBncmlkdG9sZXJhbmNlPSIxMCIgZ3VpZGV0b2xlcmFuY2U9IjEwIiBpbmtzY2FwZTpwYWdlb3BhY2l0eT0iMCIgaW5rc2NhcGU6cGFnZXNoYWRvdz0iMiIgaW5rc2NhcGU6d2luZG93LXdpZHRoPSIxOTIwIiBpbmtzY2FwZTp3aW5kb3ctaGVpZ2h0PSIxMDAxIiBzaG93Z3JpZD0iZmFsc2UiIGlua3NjYXBlOnpvb209IjAuNTY4ODY3OTIiIGlua3NjYXBlOmN4PSIxMDYwIiBpbmtzY2FwZTpjeT0iMjA1IiBpbmtzY2FwZTp3aW5kb3cteD0iLTkiIGlua3NjYXBlOndpbmRvdy15PSItOSIgaW5rc2NhcGU6d2luZG93LW1heGltaXplZD0iMSIgaW5rc2NhcGU6Y3VycmVudC1sYXllcj0ic3ZnOCIvPgogIDxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCI+CiAgICA8cGF0aCBkPSJNNjIuMDY1IDIyLjE5SDY0Yy0uNzU1IDMuNDcyLTMuNzA1IDUuODEtNy42NDYgNS44MUM1MS43MjggMjggNDggMjQuNTUgNDggMTkuOTg5IDQ4IDE1LjQyNyA1MS43MjggMTIgNTYuMzU0IDEyYzMuOTQgMCA2Ljg5IDIuMzE1IDcuNjQ2IDUuNzg3aC0xLjkzNWMtLjY2MS0yLjUxOS0yLjc4NS00LjEwNy01LjcxLTQuMTA3LTMuNjM1IDAtNi40NjcgMi43LTYuNDY3IDYuMzA5czIuODMyIDYuMzMyIDYuNDY2IDYuMzMyYzIuOTI2IDAgNS4wNS0xLjYzNSA1LjcxLTQuMTMxTTg0IDIwYzAgNC40NTUtMy41NyA4LTggOHMtOC0zLjU0NS04LTggMy41Ny04IDgtOCA4IDMuNTQ1IDggOG0tMS44MDggMGMwLTMuNS0yLjcxMS02LjMxOC02LjE5Mi02LjMxOC0zLjQ4IDAtNi4xOTIgMi44MTgtNi4xOTIgNi4zMThTNzIuNTIgMjYuMzE4IDc2IDI2LjMxOCA4Mi4xOTIgMjMuNSA4Mi4xOTIgMjBNMTAzIDEydjE2aC0xLjQ4bC05Ljc1LTEyLjYxMlYyOEg5MFYxMmgxLjQzNWw5Ljc5NCAxMi43NzdWMTJ6bTguODYgMS43MThWMTkuNmg4LjE1djEuNzE3aC04LjE1VjI4SDExMFYxMmgxMXYxLjcxOHpNMTM4IDI2LjI4MlYyOGgtMTFWMTJoMS45MTR2MTQuMjgyem0xNy01LjI4OGMwIDQuMTg1LTIuNzkgNy4wMDYtNyA3LjAwNnMtNy0yLjgyLTctNy4wMDZWMTJoMS45djguOTk0YzAgMy4wNzUgMi4wMiA1LjI5NSA1LjEgNS4yOTUgMy4wNTUgMCA1LjEtMi4yMiA1LjEtNS4yOTVWMTJoMS45em04LjgyNi03LjI3NlYxOS4yaDguMjV2MS43MThoLTguMjV2NS4zNjVIMTczVjI4aC0xMVYxMmgxMXYxLjcxOHpNMTkxIDEydjE2aC0xLjQ4bC05Ljc1LTEyLjYxMlYyOEgxNzhWMTJoMS40MzVsOS43OTQgMTIuNzc3VjEyem0xOSAxLjcxOGgtNS42MjZWMjhoLTEuNzdWMTMuNzE4SDE5N1YxMmgxM3pNMjYuMzc1IDIwLjk3NWMuODc1LS4wNDcgMS43NS0uMDc1IDIuNjI1LS4xMzl2LS42NzJjLS44NzUtLjA2NC0xLjc1LS4wOTItMi42MjUtLjE0bC0yLjYyNS0uMDgxYy0xLjU0LS4wNDctMy4wOC0uMDYtNC42MjItLjA3YTE4OCAxODggMCAwIDAtLjA1MS00LjYyM2wtLjA3NC0yLjYyNWMtLjA0NS0uODc1LS4wNy0xLjc1LS4xMzItMi42MjVoLS43NDJjLS4wNjIuODc1LS4wODcgMS43NS0uMTMyIDIuNjI1bC0uMDczIDIuNjI1Yy0uMDIuNzIzLS4wMjkgMS40NDctLjAzNiAyLjE3LS4yODUtLjY2NS0uNTctMS4zMy0uODY1LTEuOTkxbC0xLjA3Mi0yLjM5N2MtLjM3Ny0uNzktLjczNS0xLjU5LTEuMTI3LTIuMzc1bC0uNjg0LjI4NWMuMjc3LjgzMS41ODkgMS42NS44ODIgMi40NzVsLjkzNyAyLjQ1NGMuMjU4LjY3NS41MjYgMS4zNDYuNzk2IDIuMDE4YTEzMCAxMzAgMCAwIDAtMS41Ni0xLjUwOWwtMS45MDgtMS44MDRjLS42NS0uNTg3LTEuMjg3LTEuMTg4LTEuOTUtMS43NjNsLS41MjMuNTI0Yy41NzQuNjYzIDEuMTc1IDEuMyAxLjc2MiAxLjk1bDEuODA0IDEuOTA4cS43NDkuNzg2IDEuNTA5IDEuNTZjLS42NzItLjI3LTEuMzQzLS41MzgtMi4wMTktLjc5NmwtMi40NTMtLjkzN2MtLjgyNS0uMjkzLTEuNjQ0LS42MDUtMi40NzYtLjg4M2wtLjI4NC42ODVjLjc4NS4zOTIgMS41ODQuNzUgMi4zNzUgMS4xMjdsMi4zOTcgMS4wNzJjLjY2LjI5NSAxLjMyNS41OCAxLjk5Ljg2NC0uNzIzLjAwOC0xLjQ0Ni4wMTctMi4xNy4wMzZsLTIuNjI0LjA3NGMtLjg3NS4wNDUtMS43NS4wNy0yLjYyNS4xMzJ2Ljc0MmMuODc1LjA2MiAxLjc1LjA4NyAyLjYyNS4xMzJsMi42MjUuMDczYzEuNTQyLjA0MiAzLjA4My4wNDkgNC42MjQuMDUyLjAxIDEuNTQuMDIyIDMuMDgxLjA2OSA0LjYyMmwuMDgyIDIuNjI1Yy4wNDcuODc1LjA3NSAxLjc1LjEzOSAyLjYyNWguNjcyYy4wNjQtLjg3NS4wOTItMS43NS4xNC0yLjYyNWwuMDgxLTIuNjI1Yy4wMjMtLjc0MS4wMzUtMS40ODIuMDQ2LTIuMjIzcS40MzYgMS4wMjIuODkyIDIuMDM3bDEuMDggMi4zOTNjLjM3OC43OS43MzggMS41ODggMS4xMzMgMi4zNzNsLjYyLS4yNTljLS4yNzUtLjgzMi0uNTgzLTEuNjUxLS44NzUtMi40NzhsLS45My0yLjQ1NXEtLjM5NS0xLjA0LS44MDgtMi4wNzIuNzk0Ljc3NyAxLjYwNCAxLjU0bDEuOTEzIDEuNzk5Yy42NTIuNTg1IDEuMjkgMS4xODQgMS45NTUgMS43NThsLjQ3Ni0uNDc2Yy0uNTc0LS42NjQtMS4xNzMtMS4zMDMtMS43NTgtMS45NTVsLTEuNzk5LTEuOTE0YTEzMiAxMzIgMCAwIDAtMS41MzktMS42MDNxMS4wMzEuNDEzIDIuMDcuODA5bDIuNDU3LjkyOWMuODI2LjI5MiAxLjY0NS42IDIuNDc4Ljg3NmwuMjU4LS42MjJjLS43ODUtLjM5My0xLjU4Mi0uNzU1LTIuMzczLTEuMTMzbC0yLjM5My0xLjA4Yy0uNjc2LS4zMDQtMS4zNTYtLjU5OC0yLjAzNi0uODkyLjc0LS4wMSAxLjQ4MS0uMDIyIDIuMjIyLS4wNDV6Ii8+CiAgICA8cGF0aCBkPSJNMTkgMzdDOS42MjYgMzcgMiAyOS4zNzQgMiAyMFM5LjYyNiAzIDE5IDNzMTcgNy42MjYgMTcgMTctNy42MjYgMTctMTcgMTdtMC0zMi40MUMxMC41MDMgNC41OSAzLjU5IDExLjUwMiAzLjU5IDIwUzEwLjUwMyAzNS40MSAxOSAzNS40MSAzNC40MSAyOC40OTcgMzQuNDEgMjAgMjcuNDk3IDQuNTkgMTkgNC41OSIvPgogIDwvZz4KPC9zdmc+Cg==" alt="Confluent">
+      <img class="logo logo-light" src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjxzdmcgeG1sbnM6ZGM9Imh0dHA6Ly9wdXJsLm9yZy9kYy9lbGVtZW50cy8xLjEvIiB4bWxuczpjYz0iaHR0cDovL2NyZWF0aXZlY29tbW9ucy5vcmcvbnMjIiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiIHhtbG5zOnN2Zz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6c29kaXBvZGk9Imh0dHA6Ly9zb2RpcG9kaS5zb3VyY2Vmb3JnZS5uZXQvRFREL3NvZGlwb2RpLTAuZHRkIiB4bWxuczppbmtzY2FwZT0iaHR0cDovL3d3dy5pbmtzY2FwZS5vcmcvbmFtZXNwYWNlcy9pbmtzY2FwZSIgd2lkdGg9IjIxMjAiIGhlaWdodD0iNDEwIiB2aWV3Qm94PSIwIDAgMjEyIDQxIiB2ZXJzaW9uPSIxLjEiIHNvZGlwb2RpOmRvY25hbWU9InN2Z3ZpZXdlci1vdXRwdXQoMTEpLnN2ZyIgaW5rc2NhcGU6dmVyc2lvbj0iMS4wLjIgKGU4NmM4NzA4NzksIDIwMjEtMDEtMTUpIj4KICA8ZGVmcy8+CiAgPHNvZGlwb2RpOm5hbWVkdmlldyBwYWdlY29sb3I9IiNmZmZmZmYiIGJvcmRlcmNvbG9yPSIjNjY2NjY2IiBib3JkZXJvcGFjaXR5PSIxIiBvYmplY3R0b2xlcmFuY2U9IjEwIiBncmlkdG9sZXJhbmNlPSIxMCIgZ3VpZGV0b2xlcmFuY2U9IjEwIiBpbmtzY2FwZTpwYWdlb3BhY2l0eT0iMCIgaW5rc2NhcGU6cGFnZXNoYWRvdz0iMiIgaW5rc2NhcGU6d2luZG93LXdpZHRoPSIxOTIwIiBpbmtzY2FwZTp3aW5kb3ctaGVpZ2h0PSIxMDAxIiBzaG93Z3JpZD0iZmFsc2UiIGlua3NjYXBlOnpvb209IjAuNTY4ODY3OTIiIGlua3NjYXBlOmN4PSIxMDYwIiBpbmtzY2FwZTpjeT0iMjA1IiBpbmtzY2FwZTp3aW5kb3cteD0iLTkiIGlua3NjYXBlOndpbmRvdy15PSItOSIgaW5rc2NhcGU6d2luZG93LW1heGltaXplZD0iMSIgaW5rc2NhcGU6Y3VycmVudC1sYXllcj0ic3ZnOCIvPgogIDxnIGZpbGw9IiMxNzMzNjEiIGZpbGwtcnVsZT0iZXZlbm9kZCI+CiAgICA8cGF0aCBkPSJNNjIuMDY1IDIyLjE5SDY0Yy0uNzU1IDMuNDcyLTMuNzA1IDUuODEtNy42NDYgNS44MUM1MS43MjggMjggNDggMjQuNTUgNDggMTkuOTg5IDQ4IDE1LjQyNyA1MS43MjggMTIgNTYuMzU0IDEyYzMuOTQgMCA2Ljg5IDIuMzE1IDcuNjQ2IDUuNzg3aC0xLjkzNWMtLjY2MS0yLjUxOS0yLjc4NS00LjEwNy01LjcxLTQuMTA3LTMuNjM1IDAtNi40NjcgMi43LTYuNDY3IDYuMzA5czIuODMyIDYuMzMyIDYuNDY2IDYuMzMyYzIuOTI2IDAgNS4wNS0xLjYzNSA1LjcxLTQuMTMxTTg0IDIwYzAgNC40NTUtMy41NyA4LTggOHMtOC0zLjU0NS04LTggMy41Ny04IDgtOCA4IDMuNTQ1IDggOG0tMS44MDggMGMwLTMuNS0yLjcxMS02LjMxOC02LjE5Mi02LjMxOC0zLjQ4IDAtNi4xOTIgMi44MTgtNi4xOTIgNi4zMThTNzIuNTIgMjYuMzE4IDc2IDI2LjMxOCA4Mi4xOTIgMjMuNSA4Mi4xOTIgMjBNMTAzIDEydjE2aC0xLjQ4bC05Ljc1LTEyLjYxMlYyOEg5MFYxMmgxLjQzNWw5Ljc5NCAxMi43NzdWMTJ6bTguODYgMS43MThWMTkuNmg4LjE1djEuNzE3aC04LjE1VjI4SDExMFYxMmgxMXYxLjcxOHpNMTM4IDI2LjI4MlYyOGgtMTFWMTJoMS45MTR2MTQuMjgyem0xNy01LjI4OGMwIDQuMTg1LTIuNzkgNy4wMDYtNyA3LjAwNnMtNy0yLjgyLTctNy4wMDZWMTJoMS45djguOTk0YzAgMy4wNzUgMi4wMiA1LjI5NSA1LjEgNS4yOTUgMy4wNTUgMCA1LjEtMi4yMiA1LjEtNS4yOTVWMTJoMS45em04LjgyNi03LjI3NlYxOS4yaDguMjV2MS43MThoLTguMjV2NS4zNjVIMTczVjI4aC0xMVYxMmgxMXYxLjcxOHpNMTkxIDEydjE2aC0xLjQ4bC05Ljc1LTEyLjYxMlYyOEgxNzhWMTJoMS40MzVsOS43OTQgMTIuNzc3VjEyem0xOSAxLjcxOGgtNS42MjZWMjhoLTEuNzdWMTMuNzE4SDE5N1YxMmgxM3pNMjYuMzc1IDIwLjk3NWMuODc1LS4wNDcgMS43NS0uMDc1IDIuNjI1LS4xMzl2LS42NzJjLS44NzUtLjA2NC0xLjc1LS4wOTItMi42MjUtLjE0bC0yLjYyNS0uMDgxYy0xLjU0LS4wNDctMy4wOC0uMDYtNC42MjItLjA3YTE4OCAxODggMCAwIDAtLjA1MS00LjYyM2wtLjA3NC0yLjYyNWMtLjA0NS0uODc1LS4wNy0xLjc1LS4xMzItMi42MjVoLS43NDJjLS4wNjIuODc1LS4wODcgMS43NS0uMTMyIDIuNjI1bC0uMDczIDIuNjI1Yy0uMDIuNzIzLS4wMjkgMS40NDctLjAzNiAyLjE3LS4yODUtLjY2NS0uNTctMS4zMy0uODY1LTEuOTkxbC0xLjA3Mi0yLjM5N2MtLjM3Ny0uNzktLjczNS0xLjU5LTEuMTI3LTIuMzc1bC0uNjg0LjI4NWMuMjc3LjgzMS41ODkgMS42NS44ODIgMi40NzVsLjkzNyAyLjQ1NGMuMjU4LjY3NS41MjYgMS4zNDYuNzk2IDIuMDE4YTEzMCAxMzAgMCAwIDAtMS41Ni0xLjUwOWwtMS45MDgtMS44MDRjLS42NS0uNTg3LTEuMjg3LTEuMTg4LTEuOTUtMS43NjNsLS41MjMuNTI0Yy41NzQuNjYzIDEuMTc1IDEuMyAxLjc2MiAxLjk1bDEuODA0IDEuOTA4cS43NDkuNzg2IDEuNTA5IDEuNTZjLS42NzItLjI3LTEuMzQzLS41MzgtMi4wMTktLjc5NmwtMi40NTMtLjkzN2MtLjgyNS0uMjkzLTEuNjQ0LS42MDUtMi40NzYtLjg4M2wtLjI4NC42ODVjLjc4NS4zOTIgMS41ODQuNzUgMi4zNzUgMS4xMjdsMi4zOTcgMS4wNzJjLjY2LjI5NSAxLjMyNS41OCAxLjk5Ljg2NC0uNzIzLjAwOC0xLjQ0Ni4wMTctMi4xNy4wMzZsLTIuNjI0LjA3NGMtLjg3NS4wNDUtMS43NS4wNy0yLjYyNS4xMzJ2Ljc0MmMuODc1LjA2MiAxLjc1LjA4NyAyLjYyNS4xMzJsMi42MjUuMDczYzEuNTQyLjA0MiAzLjA4My4wNDkgNC42MjQuMDUyLjAxIDEuNTQuMDIyIDMuMDgxLjA2OSA0LjYyMmwuMDgyIDIuNjI1Yy4wNDcuODc1LjA3NSAxLjc1LjEzOSAyLjYyNWguNjcyYy4wNjQtLjg3NS4wOTItMS43NS4xNC0yLjYyNWwuMDgxLTIuNjI1Yy4wMjMtLjc0MS4wMzUtMS40ODIuMDQ2LTIuMjIzcS40MzYgMS4wMjIuODkyIDIuMDM3bDEuMDggMi4zOTNjLjM3OC43OS43MzggMS41ODggMS4xMzMgMi4zNzNsLjYyLS4yNTljLS4yNzUtLjgzMi0uNTgzLTEuNjUxLS44NzUtMi40NzhsLS45My0yLjQ1NXEtLjM5NS0xLjA0LS44MDgtMi4wNzIuNzk0Ljc3NyAxLjYwNCAxLjU0bDEuOTEzIDEuNzk5Yy42NTIuNTg1IDEuMjkgMS4xODQgMS45NTUgMS43NThsLjQ3Ni0uNDc2Yy0uNTc0LS42NjQtMS4xNzMtMS4zMDMtMS43NTgtMS45NTVsLTEuNzk5LTEuOTE0YTEzMiAxMzIgMCAwIDAtMS41MzktMS42MDNxMS4wMzEuNDEzIDIuMDcuODA5bDIuNDU3LjkyOWMuODI2LjI5MiAxLjY0NS42IDIuNDc4Ljg3NmwuMjU4LS42MjJjLS43ODUtLjM5My0xLjU4Mi0uNzU1LTIuMzczLTEuMTMzbC0yLjM5My0xLjA4Yy0uNjc2LS4zMDQtMS4zNTYtLjU5OC0yLjAzNi0uODkyLjc0LS4wMSAxLjQ4MS0uMDIyIDIuMjIyLS4wNDV6Ii8+CiAgICA8cGF0aCBkPSJNMTkgMzdDOS42MjYgMzcgMiAyOS4zNzQgMiAyMFM5LjYyNiAzIDE5IDNzMTcgNy42MjYgMTcgMTctNy42MjYgMTctMTcgMTdtMC0zMi40MUMxMC41MDMgNC41OSAzLjU5IDExLjUwMiAzLjU5IDIwUzEwLjUwMyAzNS40MSAxOSAzNS40MSAzNC40MSAyOC40OTcgMzQuNDEgMjAgMjcuNDk3IDQuNTkgMTkgNC41OSIvPgogIDwvZz4KPC9zdmc+Cg==" alt="Confluent">
+      <span class="sep"></span>
+      <img class="aws" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MCA0MCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLUdyb3VwLzMyL0FXUy1DbG91ZC1sb2dvXzMyPC90aXRsZT48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGZpbGw9IiMyNDJmM2UiIGQ9Ik0wIDBoNDB2NDBIMHoiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMzIuNjk4IDIzLjljLjM2MS40Ny0uNCAyLjQtLjc0IDMuMjY0LS4xMDUuMjYyLjExNy4zNjUuMzUuMTY4IDEuNTEyLTEuMjg0IDEuOTA0LTMuOTc1IDEuNTkzLTQuMzYzLS4zMDctLjM4Ni0yLjk1LS43MTctNC41NjMuNDMyLS4yNDkuMTc3LS4yMDYuNDIuMDcuMzg5LjkwNy0uMTEyIDIuOTMtLjM1NyAzLjI5LjExbS0uODQyIDIuMDFjLjUxOC0uMzc4LjA3NC0uOTQxLS40NTQtLjcyLTMuNTEzIDEuNDY0LTcuMzI3IDIuMTczLTEwLjggMi4xNzMtNS4xNDMgMC0xMC4xMjctMS4zOS0xNC4xNTYtMy42OTUtLjM1Mi0uMjAyLS42MTMuMTU1LS4zMTkuNDE0IDMuNzMzIDMuMzE2IDguNjcgNS4zMDkgMTQuMTQ3IDUuMzA5IDMuOTEgMCA4LjQ1MS0xLjIwOCAxMS41ODItMy40ODFtLTIuMTQ0LTUuMjE1YTYuNiA2LjYgMCAwIDEtMS40NTktLjE2MXEtLjcxNC0uMTYzLTEuMDkzLS4zNzMtLjIzMy0uMTI4LS4yOS0uMjU4YS43LjcgMCAwIDEtLjA1OS0uMjZ2LS40N3EwLS4yOS4yMTYtLjI5Mi4wODMuMDAyLjE3My4wMzMuMDkxLjAzNC4yNDEuMDk4LjQ4LjIxIDEuMDQ0LjMyNC41NjQuMTEzIDEuMTI2LjExMy44OTUgMCAxLjM4NC0uMzA4YS45Ny45NyAwIDAgMCAuNDktLjg3My44OC44OCAwIDAgMC0uMjU4LS42NXEtLjI1Ni0uMjU4LS45NTItLjQ4NGwtMS4zNzUtLjQyMXEtMS4wNDUtLjMyNS0xLjUxNy0uOTM4YTIuMTcgMi4xNyAwIDAgMS0uNDcyLTEuMzQ3cTAtLjU4MS4yNTgtMS4wMjcuMjU1LS40NDUuNjc2LS43NjEuNDI3LS4zMTQuOTktLjQ3OEE0LjMgNC4zIDAgMCAxIDMwLjAyNSAxMnEuMzE1IDAgLjY0LjA0YTYuMyA2LjMgMCAwIDEgMS4xNS4yNTJxLjI0OC4wODIuNC4xNjJhLjkuOSAwIDAgMSAuMjguMjI3LjUuNSAwIDAgMSAuMDgzLjMwOHYuNDM2cTAgLjI5MS0uMjE3LjI5LS4xMTQuMDAyLS4zNjQtLjExMWMtLjU0LS4yNC0xLjE1LS4zNTYtMS44Mi0uMzU2cS0uODE1IDAtMS4yNjIuMjU4LS40NDguMjYtLjQ0OC44MjcgMCAuMzg4LjI4My42NTUuMjgxLjI2NyAxLjA0NC41MWwxLjM0Mi40MjNxMS4wMjguMzIyIDEuNDY2Ljg4OC40NDEuNTY4LjQ0MSAxLjI5NSAwIC42LS4yNSAxLjA3OC0uMjQ4LjQ3Ny0uNjg5LjgxN2EzLjEgMy4xIDAgMCAxLTEuMDUuNTE4cS0uNjE1LjE3OS0xLjM0My4xNzhtLTEyLjE2NS0uMjQ0cS0uMjQ4LjAwMi0uMzY1LS4wODctLjExNy0uMDktLjE5OS0uMzY1bC0yLjIyMi03LjE1N2ExLjggMS44IDAgMCAxLS4wODItLjM3MXEwLS4yMjcuMjMzLS4yMjdoLjkyN3EuMjY1IDAgLjM3NC4wOS4xMDYuMDg2LjE5LjM2NGwxLjU5IDYuMTIgMS40NzctNi4xMnEuMDY2LS4yNzguMTgxLS4zNjQuMTE2LS4wOS4zOC0uMDloLjc2NXEuMjYzIDAgLjM4LjA5LjExNi4wODYuMTgyLjM2NGwxLjQ5MyA2LjIgMS42NC02LjJxLjA4Mi0uMjc4LjE5LS4zNjQuMTA5LS4wOS4zNzMtLjA5aC44NzhxLjIzMyAwIC4yMzMuMjI3YTEgMSAwIDAgMS0uMDE2LjE0NCAyIDIgMCAwIDEtLjA2OC4yMjdsLTIuMjg2IDcuMTU3cS0uMDgzLjI3NS0uMi4zNjUtLjExNi4wODgtLjM2NC4wODdoLS44MTNxLS4yNjQuMDAxLS4zOC0uMDk0LS4xMTYtLjA5OS0uMTgyLS4zNzNsLTEuNDc2LTUuOTYtMS40NTcgNS45NnEtLjA2Ny4yNzQtLjE4My4zNzMtLjExNi4wOTUtLjM4LjA5NHpNOS45NCAxOS40NDlxLjQ2NSAwIC45OC0uMTcuNTEzLS4xNy44OTMtLjU5Mi4yMzItLjI1OS4zMjQtLjU5MS4wOS0uMzMuMDktLjgwMXYtLjM4OGE4IDggMCAwIDAtMS43NTctLjIxMXEtLjk0NSAwLTEuNDA4LjM3My0uNDY0LjM3LS40NjUgMS4wNyAwIC42NDUuMzUuOTc4LjM0Ny4zMzIuOTkzLjMzMm0zLjg0Ni0xLjQwOHEwIC41MTcuMTA3LjgyNS4xMS4zMS4zMDcuNjY0YS40LjQgMCAwIDEgLjA2Ni4yMDlxMCAuMTQ4LS4xODIuMjc2bC0uNTk3LjM5YS41LjUgMCAwIDEtLjI0OC4wOC40LjQgMCAwIDEtLjI4Mi0uMTI4IDIgMiAwIDAgMS0uMzM5LS40MyA2IDYgMCAwIDEtLjI5LS41NDRxLTEuMTEyIDEuMjgtMi43ODUgMS4yOC0xLjE5NC4wMDEtMS44OS0uNjY0LS42OTYtLjY2NC0uNjk2LTEuNzggMC0xLjE4Mi44NjMtMS45MDMuODYtLjcyIDIuMzItLjcyMS40OCAwIDEuMDAyLjA3M3QxLjA4NC4yMDN2LS42OHEuMDAxLTEuMDUyLS40NDYtMS40ODItLjQ0Ni0uNDI4LTEuNTQtLjQyOGE0LjUgNC41IDAgMCAwLTEuMDIuMTIgNy41IDcuNSAwIDAgMC0xLjAyLjMxNSAzIDMgMCAwIDEtLjMzLjEyMi43LjcgMCAwIDEtLjE1LjAyNHEtLjE5OS4wMDEtLjItLjI5MnYtLjQ1MnEuMDAxLS4yMjguMDY4LS4zMjMuMDY2LS4wOTkuMjY1LS4xOTVhNiA2IDAgMCAxIDEuMTkyLS40MjEgNiA2IDAgMCAxIDEuNDc2LS4xOGMxLjEyNiAwIDEuOTUyLjI1NCAyLjQ3Ny43NTRxLjc4Ny43NTMuNzg4IDIuMjc1eiIvPjwvZz48L3N2Zz4=" alt="AWS">
+    </div>
+    <div class="titles">
+      <h1>Confluent Platform on Amazon EKS</h1>
+      <p>Private, multi-AZ streaming platform, with partner access only through a Confluent Private Cloud Gateway in a DMZ</p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Highlight a flow">
+        <button data-mode="all" aria-pressed="true">Overview</button>
+        <button data-mode="kafka" aria-pressed="false">Kafka via Gateway</button>
+        <button data-mode="apps" aria-pressed="false">Internal + external apps</button>
+        <button data-mode="sr" aria-pressed="false">Schema Registry</button>
+        <button data-mode="gov" aria-pressed="false">Data governance</button>
+        <button data-mode="enc" aria-pressed="false">Encryption (CSFLE)</button>
+        <button data-mode="security" aria-pressed="false">Security boundaries</button>
+      </div>
+      <button class="tool" id="play">Play walkthrough</button>
+      <button class="tool" id="theme">Light theme</button>
+      <button class="tool" id="fs">Full screen</button>
+    </div>
+  </header>
+
+  <div class="stage">
+    <svg id="diagram" viewBox="12 94 1744 962" role="img" aria-labelledby="diagram-title">
+      <title id="diagram-title">Architecture: internet partners reach a CPC Gateway in a DMZ VPC, which connects over VPC peering to a private Confluent Platform in the core VPC</title>
+    </svg>
+    <div class="tip" hidden></div>
+  </div>
+
+  <section class="endpoints" aria-label="Endpoints">
+    <div class="ep" style="--c: var(--kafka)"><span>PUBLIC ENDPOINT · INTERNET</span><code>kafka.gateway.wf.dspdemos.com:9092</code><small>External apps, through the CPC Gateway (mTLS + SNI)</small></div>
+    <div class="ep" style="--c: var(--kafka)"><span>PRIVATE ENDPOINT · VPC</span><code>kafka.internal.dspdemos.com:9092</code><small>Gateway upstream to the brokers, via internal NLBs</small></div>
+    <div class="ep" style="--c: var(--app)"><span>IN-CLUSTER ENDPOINT · CORE APPS</span><code>kafka.confluent.svc.cluster.local:9071</code><small>Apps inside cfk-eks, directly to the brokers</small></div>
+    <div class="ep" style="--c: var(--sr)"><span>SCHEMA REGISTRY · INTERNET</span><code>https://sr.wf.dspdemos.com</code><small>External apps' Avro serdes, read-only registry in the DMZ</small></div>
+  </section>
+
+  <section class="caption" aria-live="polite">
+    <h2><span class="swatch"></span><span id="cap-title"></span></h2>
+    <ol id="cap-steps"></ol>
+  </section>
+
+  <footer class="legend">
+    <span><i style="border-color: var(--kafka)"></i>Kafka via Gateway, mTLS</span>
+    <span><i style="border-color: var(--app)"></i>In-cluster app, mTLS (port 9071)</span>
+    <span><i style="border-color: var(--sr)"></i>Schema Registry, HTTPS + LDAP basic auth</span>
+    <span><i style="border-color: var(--sr); border-top-style: dotted"></i>Schema linking, core to read-only SR</span>
+    <span><i style="border-color: var(--gov); border-top-style: dashed"></i>Gateway schemas, rules and DEKs</span>
+    <span><i style="border-color: var(--kms)"></i>AWS KMS, HTTPS + IAM (IRSA)</span>
+    <span><i style="border-color: var(--deny); border-top-style: dotted"></i>Network boundary (peering, security groups, network ACLs)</span>
+    <span class="push">Hover any component for details</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const I = {
+    eks: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLzQ4L0FyY2hfQW1hem9uLUVsYXN0aWMtS3ViZXJuZXRlcy1TZXJ2aWNlXzQ4PC90aXRsZT48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGZpbGw9IiNlZDcxMDAiIGQ9Ik0wIDBoNjR2NjRIMHoiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJtMzcuNzA4IDI1LTUuMDU4IDYuMzQgNS4zMTcgNi42ODFoLTIuMjE1TDMxIDMyLjAwMXY2aC0yVjI1aDJ2NS4yNGw0LjQ2My01LjI0ek01MCAzNi4zODJsLTYtM1YyNWExIDEgMCAwIDAtLjUxNS0uODc0TDM1IDE5LjQxMlYxMi43NWwxNSA4LjgyMnptMS41MDctMTYuMjQ0LTE3LTEwYTEuMDAxIDEuMDAxIDAgMCAwLTEuNTA3Ljg2M3Y5YzAgLjM2Mi4xOTcuNjk3LjUxNS44NzNMNDIgMjUuNTg4VjM0YzAgLjM4LjIxNC43MjUuNTUzLjg5NWw4IDRhMSAxIDAgMCAwIC45NzItLjA0NGMuMjk1LS4xODMuNDc1LS41MDQuNDc1LS44NVYyMWMwLS4zNTUtLjE4OC0uNjgzLS40OTMtLjg2M00zMiA1MS44MjggMTUgNDEuNDM5VjIxLjU1NGwxNC04Ljc1djYuNjQybC03LjUzIDQuNzA2QTEgMSAwIDAgMCAyMSAyNXYxM2ExIDEgMCAwIDAgLjQ4NS44NTdsMTAgNmExIDEgMCAwIDAgLjk5NC4wMjFsMTAuNTA5LTUuNzMyIDUuMDQ3IDIuODgzem0xOC40OTYtMTAuNjk2LTctNGExIDEgMCAwIDAtLjk3NS0uMDFsLTEwLjQ5OCA1LjcyNkwyMyAzNy40MzR2LTExLjg4bDcuNTMtNC43MDZBMSAxIDAgMCAwIDMxIDIwdi05YTEgMSAwIDAgMC0xLjUzLS44NDdsLTE2IDEwQTEgMSAwIDAgMCAxMyAyMXYyMWMwIC4zNDguMTgyLjY3MS40NzkuODU0bDE4IDExYTEgMSAwIDAgMCAxLjA0MiAwbDE4LTExYTEgMSAwIDAgMC0uMDI1LTEuNzIyIi8+PC9nPjwvc3ZnPg==',
+    r53: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLzQ4L0FyY2hfQW1hem9uLVJvdXRlLTUzXzQ4PC90aXRsZT48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGZpbGw9IiM4YzRmZmYiIGQ9Ik0wIDBoNjR2NjRIMHoiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMzguNzYxIDMyLjUyN3EuODYyLjc5Ni44NjIgMi4xMzcgMCAxLjQ2LTEuMDQ5IDIuMzN0LTIuODIuODcxYTYuOSA2LjkgMCAwIDEtMi43NjgtLjU5NXYtMS4xOTJxMS42MjIuNTM2IDIuNzY4LjUzNiAxLjEzIDAgMS43NDEtLjUwNi42MTEtLjUwNy42MTEtMS40NDQgMC0xLjgwMi0yLjI3OC0xLjgwMi0uNzE0IDAtMS40MTQuMDc0di0uOTgzbDMuMTI2LTMuNDFoLTQuNDA2di0xLjIyMWg2LjA1OXYxLjE3N2wtMy4wNjcgMy4yNDZhMSAxIDAgMCAxIC4xNDktLjAxNWguMTQ5cTEuNDc0IDAgMi4zMzcuNzk3bS04LjY0Ny0uMjZxLjkwNi44NDguOTA3IDIuMzM3IDAgMS40Ni0xLjA1NyAyLjM2LTEuMDU4LjkwMS0yLjc4My45MDEtMS41MTggMC0yLjg0My0uNTk1di0xLjE5MnExLjY1My41MzYgMi44MjguNTM2IDEuMTMxIDAgMS43MzQtLjUxMy42MDMtLjUxNC42MDItMS40ODIuMDAxLTEuMDU3LS41NjUtMS41MzQtLjU2NS0uNDc2LTEuODQ2LS40NzYtLjkyMiAwLTIuMzA3LjE0OXYtLjk4M2wuMjg0LTQuNDUzSDMwLjV2MS4yMjJoLTQuMTgybC0uMTk1IDMuMDIzcS44MTktLjE1IDEuNDc0LS4xNSAxLjYwOCAwIDIuNTE3Ljg1bTExLjE0NyAxMC42OTdjLTMuNzQ1LjY3Mi03LjAyOCAyLjE4Mi05LjI2MSAzLjQzMS0yLjIzMi0xLjI1LTUuNTE1LTIuNzYtOS4yNi0zLjQzMS0xLjAzMi0uMTg1LTYuMTc0LTEuMjU2LTYuMTc0LTQuMTQgMC0xLjM2MS40OTctMi4yODIgMS40NTEtMy45MjQgMS4xMTYtMS45MjYgMi42NDYtNC41NjQgMi42NDYtOC4yMjYgMC0yLjU2NC0uNjU5LTUuMDIzLTEuOTYtNy4zMmwuMjY5LS4zMzFjMS45NTUuOTUgMy45ODcgMS40MyA2LjA1MyAxLjQzIDIuNTQ2IDAgNC44ODktLjY1NyA2Ljk3NS0xLjk1MSAyLjA4NiAxLjI5NCA0LjQzIDEuOTUgNi45NzYgMS45NSAyLjA2NSAwIDQuMDk3LS40OCA2LjA1My0xLjQzbC4yNjguMzMxYy0xLjMwMSAyLjI5OC0xLjk2IDQuNzU3LTEuOTYgNy4zMiAwIDMuNjYzIDEuNTMgNi4zIDIuNjQ3IDguMjI3Ljk1NCAxLjY0MiAxLjQ1MSAyLjU2MyAxLjQ1MSAzLjkyNSAwIDIuODgzLTUuMTQzIDMuOTU0LTYuMTc0IDQuMTM5bTQuMDc2LTE2LjI5YzAtMi40MTUuNjgyLTQuNzMgMi4wMjUtNi44ODJhMSAxIDAgMCAwLS4wNzQtMS4xNjJjLS4zOTUtLjQ4NS0uODA5LS45OTQtMS4yMTgtMS41YTEgMSAwIDAgMC0xLjI2MS0uMjQ2Yy0xLjg4MyAxLjA0LTMuODQ2IDEuNTY4LTUuODMzIDEuNTY4LTIuNCAwLTQuNDk0LS42NDQtNi40MDYtMS45N2ExIDEgMCAwIDAtMS4xMzkgMGMtMS45MTIgMS4zMjYtNC4wMDcgMS45Ny02LjQwNiAxLjk3LTEuOTg4IDAtMy45NTEtLjUyOC01LjgzMy0xLjU2OGExIDEgMCAwIDAtMS4yNjEuMjQ2Yy0uNDA5LjUwNi0uODIzIDEuMDE1LTEuMjE5IDEuNWExIDEgMCAwIDAtLjA3MyAxLjE2MmMxLjM0MyAyLjE1MiAyLjAyNCA0LjQ2NyAyLjAyNCA2Ljg4MiAwIDMuMTI0LTEuMjYyIDUuMy0yLjM3NyA3LjIyMS0xLjA2NiAxLjg0LTEuNzIgMy4wNi0xLjcyIDQuOTMgMCA0LjM2MyA1Ljk4NSA1Ljc3OCA3LjgyIDYuMTA4IDMuNzUuNjc0IDcuMDI0IDIuMjY1IDkuMTExIDMuNDhhMSAxIDAgMCAwIDEuMDA2IDBjMi4wODctMS4yMTUgNS4zNjItMi44MDYgOS4xMTItMy40OCAxLjgzNC0uMzMgNy44Mi0xLjc0NSA3LjgyLTYuMTA4IDAtMS44Ny0uNjU0LTMuMDktMS43MjEtNC45My0xLjExNC0xLjkyLTIuMzc3LTQuMDk3LTIuMzc3LTcuMjIxbS0zLjI2OSAyMC43ODVjLTQuNjY2LjgzOC04LjYgMy4yOTYtMTAuMDY4IDQuMzA5LTEuNDY4LTEuMDEzLTUuNDAxLTMuNDctMTAuMDY3LTQuMzEtMi4zMy0uNDE4LTkuOTMzLTIuMjgtOS45MzMtOC42MzMgMC0yLjY1NSAxLjAwNC00LjM4NyAyLjA2OC02LjIyLjk5OC0xLjcyIDIuMDMtMy40OTggMi4wMy01LjkzMSAwLTMuNjY3LTIuMDI3LTYuMzAyLTMuMTU3LTcuNDg3IDEuMTU0LTEuNDA1IDMuNjk1LTQuNTA2IDUuMDg4LTYuMjkgMi4xMjIgMS45MzUgNC41NzEgMi45ODggNi45OTYgMi45ODggMi43MDEgMCA0Ljk0Mi0xLjA2NSA2Ljk3NS0zLjMzNiAyLjAzMyAyLjI3IDQuMjc1IDMuMzM2IDYuOTc2IDMuMzM2IDIuNDI1IDAgNC44NzQtMS4wNTMgNi45OTYtMi45ODggMS4zOTMgMS43ODQgMy45MzQgNC44ODUgNS4wODggNi4yOS0xLjEzIDEuMTg1LTMuMTU3IDMuODItMy4xNTcgNy40ODcgMCAyLjQzMyAxLjAzMiA0LjIxMiAyLjAzIDUuOTMyQzUwLjk5NiAzNC40MzggNTIgMzYuMTcgNTIgMzguODI1YzAgNi4zNTQtNy42MDIgOC4yMTUtOS45MzIgOC42MzRNNTEuNjYyIDMxLjZjLS45NDQtMS42MjctMS43NTktMy4wMzMtMS43NTktNC45MjcgMC00LjAwMiAzLjEyMS02LjYwMyAzLjE1LTYuNjI3YTEgMSAwIDAgMCAuMTQzLTEuNDE0Yy0uMDUyLS4wNjItNS4xNDctNi4yNC02LjMxMS03LjgzNWExIDEgMCAwIDAtMS41MzgtLjA5NGMtMS45MTcgMi4wNS00LjE4IDMuMTgtNi4zNzEgMy4xOC0yLjQxNiAwLTQuMzIyLTEuMDgzLTYuMTgyLTMuNTEzLS4zNzktLjQ5NS0xLjIwOS0uNDk1LTEuNTg4IDAtMS44NTkgMi40My0zLjc2NSAzLjUxMy02LjE4MSAzLjUxMy0yLjE5MiAwLTQuNDU0LTEuMTMtNi4zNzEtMy4xOGExIDEgMCAwIDAtMS41MzkuMDk0Yy0xLjE2NCAxLjU5Ni02LjI1OCA3Ljc3My02LjMxIDcuODM1LS4xNy4yMDYtLjI1LjQ3LS4yMjQuNzM3LjAyOC4yNjYuMTU5LjUxLjM2Ny42NzcuMDMyLjAyNiAzLjE1IDIuNTk1IDMuMTUgNi42MjcgMCAxLjg5NC0uODE2IDMuMy0xLjc2IDQuOTI3QzExLjI0MiAzMy40OSAxMCAzNS42MzEgMTAgMzguODI1YzAgNS4zMzYgNC4zMjggOS4zIDExLjU3OSAxMC42MDQgNS4zMTYuOTU0IDkuNzY4IDQuMzMgOS44MTMgNC4zNjVhMSAxIDAgMCAwIDEuMjE4LS4wMDFjLjA0NC0uMDM0IDQuNDc4LTMuNDA2IDkuODExLTQuMzY0QzQ5LjY3MiA0OC4xMjUgNTQgNDQuMTYgNTQgMzguODI1YzAtMy4xOTQtMS4yNDItNS4zMzUtMi4zMzgtNy4yMjQiLz48L2c+PC9zdmc+',
+    acm: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLzQ4L0FyY2hfQVdTLUNlcnRpZmljYXRlLU1hbmFnZXJfNDg8L3RpdGxlPjxnIGZpbGw9Im5vbmUiIGZpbGwtcnVsZT0iZXZlbm9kZCI+PHBhdGggZmlsbD0iI2RkMzQ0YyIgZD0iTTAgMGg2NHY2NEgweiIvPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0yOC43MjIgMzAuOTgxYTEgMSAwIDAgMSAuMjYxLjg3N2wtLjU4OSAzLjE0IDMuMDkyLTEuODU1YS45OS45OSAwIDAgMSAxLjAyOSAwbDMuMDkzIDEuODU1LS41OS0zLjE0NmExIDEgMCAwIDEgLjI2MS0uODc2bDIuNjYxLTIuNzc5LTMuNTg1LS41MzJhMSAxIDAgMCAxLS43MzYtLjUxOGwtMS42MjctMy4wNDMtMS42NjcgMy4wNTRjLS4xNS4yNzQtLjQxOS40NjMtLjcyOS41MWwtMy41MzkuNTM2em0tMi43MDQgNS44MzQuOTA0LTQuODItMy42NDMtMy43OThhLjk5OS45OTkgMCAwIDEgLjU3Mi0xLjY4MWw0Ljk1NS0uNzUyIDIuMzE2LTQuMjQzYy4xNzYtLjMyMS41MTMtLjUyMS44NzgtLjUyMWguMDA0Yy4zNjcuMDAyLjcwNC4yMDUuODc4LjUyOGwyLjI2NCA0LjIzMiA1LjAwMS43NDNhMSAxIDAgMCAxIC41NzUgMS42ODFsLTMuNjQ1IDMuODA0LjkwNiA0LjgyOGEuOTk5Ljk5OSAwIDAgMS0xLjQ5NyAxLjA0MUwzMiAzNS4xNjZsLTQuNDg1IDIuNjkxYS45OS45OSAwIDAgMS0xLjA4Ni0uMDM2IDEgMSAwIDAgMS0uNDExLTEuMDA2TTEyIDE3LjAxN2gzOS45OTdWMTNIMTJ6TTU0IDUyYS45OTcuOTk3IDAgMCAxLTEgMWgtNXYtMmg0bC0uMDAyLTMxLjk4M0gxMlY1MWgyOXYySDExYTEgMSAwIDAgMS0xLTFWMTJhMSAxIDAgMCAxIDEtMWg0MS45OTdhMSAxIDAgMCAxIDEgMXptLTM1LTVoNXYtMmgtNXptOCAwaDExdi0ySDI3em0tOC00LjAwM2g1di0yaC01ek0yNyA0M2gxOHYtMkgyN3oiLz48L2c+PC9zdmc+',
+    waf: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLzQ4L0FyY2hfQVdTLVdBRl80ODwvdGl0bGU+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48cGF0aCBmaWxsPSIjZGQzNDRjIiBkPSJNMCAwaDY0djY0SDB6Ii8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTI2LjkyOSA0MC4zOTdhMTguNiAxOC42IDAgMCAwIDMuMDQgMS42OTJjLS40NzctMi4zNzYtLjc5NC02LjQ4NyAxLjM0My0xMC40MTggMS41OTMtMi45MjggMS44NTYtNi4yNTQuNjg4LTguNjgxYTUuOSA1LjkgMCAwIDAtMS45MjItMi4yOTJjLjc2MiAxLjc1OSAxLjE5IDQuMjk5LjAzOCA3LjU3MmExIDEgMCAwIDEtMS44MjUuMTQyYy0uMzMxLS42MTYtMS4yNDItMi4wMDQtMi4yODMtMi44MzMuNDA4IDEuODc2LjY2NyA0LjY4My0uNjczIDYuNzg4YTggOCAwIDAgMC0uMjAxLjMzNGMtMS40NyAyLjU4OS0uNjgyIDUuOTcgMS43OTUgNy42OTZtNy41NDItMTYuMjQyYy41NjUgMi42NDkuMDkyIDUuNzI1LTEuNDAxIDguNDcxLTIuMTY1IDMuOTgxLTEuMzYzIDguMzE5LS45MSAxMC4wMjUgMS45NTctLjMyOSA2LjkwMy0xLjU1NyA3Ljk1OS01LjY0OSAxLjAxNC0zLjkyNi40LTYuMTk5LS4zMS03LjQyNC0uNzA4IDIuNTQ0LTIuMDA3IDMuNjE1LTIuMDc0IDMuNjY5YTEuMDAyIDEuMDAyIDAgMCAxLTEuNjE0LS45MzhjLjYwNi0zLjc2OC0uMzYtNi4zOS0xLjY1LTguMTU0TTIzLjY1IDMxLjI5YzEuNjA5LTIuNTI3LS4wNzQtNi45NjUtLjA5MS03LjAxYTEgMSAwIDAgMSAuOTMyLTEuMzYxYzEuNzUgMCAzLjI0OCAxLjM1NSA0LjI1IDIuNTkzLjUyOS0zLjk4OS0xLjg3Ny02LjA4NC0xLjk5Ny02LjE4NGExLjAwNCAxLjAwNCAwIDAgMS0uMjYtMS4xOTEuOTkuOTkgMCAwIDEgMS4wNzctLjU2MWMxLjQ3NC4yNjEgMi43NzMuODIyIDMuODUgMS42MzMuOTU1LjQyNyA1LjcyNiAyLjgzOSA2LjcxNCA4LjdxLjA0LS4yNjQuMDcyLS41NWExIDEgMCAwIDEgMS40NzQtLjc3NGMuMTg3LjEwMyA0LjUzMyAyLjU5NSAyLjM4NCAxMC45MTctMS42NzUgNi40ODgtMTAuMTggNy4yMjctMTAuNTQxIDcuMjU1bC0uMDAxLS4wMWMtLjAyMi4wMDItLjA0MS4wMTMtLjA2My4wMTNhMSAxIDAgMCAxLS4zMzUtLjA1OWMtMi4wNTQtLjczNC0zLjg0Ny0xLjYzLTUuMzMtMi42NjMtMy4zMTQtMi4zMS00LjM2NC02Ljg0Ny0yLjM5LTEwLjMyN2ExMCAxMCAwIDAgMSAuMjU1LS40MjFtLTguMTYgMTIuNjYgMS42Mi0xLjE3M0ExOC4yIDE4LjIgMCAwIDEgMTMuNjc3IDMzSDE2di0yaC0yLjMyMWExOC4xNiAxOC4xNiAwIDAgMSAzLjQzMi05LjcxOWwtMS42MjEtMS4xNzNBMjAuMTYgMjAuMTYgMCAwIDAgMTEuNjc5IDMxaC0xLjY4djJoMS42NzdjLjE4NiAzLjk2MiAxLjQ4NCA3LjczMSAzLjgxNCAxMC45NW0yNy4yNTcgMi45NjhBMTguMiAxOC4yIDAgMCAxIDMzIDUwLjM1MVY0OGgtMnYyLjM1MWExOC4yIDE4LjIgMCAwIDEtOS43NS0zLjQzM2wtMS4xNzIgMS42MjFBMjAuMiAyMC4yIDAgMCAwIDMxIDUyLjM1MVY1NGgydi0xLjY0OWMzLjk1LS4xOTEgNy43MDktMS40ODkgMTAuOTE5LTMuODEyek0yMS4yNSAxNy4xNEExOC4yIDE4LjIgMCAwIDEgMzEgMTMuNzA4VjE2aDJ2LTIuMjkyYTE4LjIgMTguMiAwIDAgMSA5Ljc0NyAzLjQzMmwxLjE3Mi0xLjYyYTIwLjE1IDIwLjE1IDAgMCAwLTEwLjkyLTMuODEyVjEwaC0ydjEuNzA4YTIwLjE2IDIwLjE2IDAgMCAwLTEwLjkyMSAzLjgxMnpNNTIuMzIgMzFhMjAuMiAyMC4yIDAgMCAwLTMuODExLTEwLjg5MmwtMS42MjEgMS4xNzNBMTguMiAxOC4yIDAgMCAxIDUwLjMyIDMxSDQ4djJoMi4zMjNhMTguMiAxOC4yIDAgMCAxLTMuNDM1IDkuNzc3bDEuNjIgMS4xNzNjMi4zMy0zLjIxOSAzLjYyOS02Ljk4OCAzLjgxNS0xMC45NUg1NHYtMnptLTcuMjkzLTEwLjU4NCA2LjE1OS02LjE2LTEuNDE0LTEuNDE0LTYuMTYgNi4xNnpNMTguOTcyIDQzLjY0MmwtNi4xNiA2LjE2IDEuNDE0IDEuNDE0IDYuMTYtNi4xNnptMy40NDItMjIuNjQxTDExLjU4NiAxMC4xNzNsLTEuNDE0IDEuNDE0TDIxIDIyLjQxNXpNNDMgNDEuNTg2bDEwLjgyNiAxMC44MjctMS40MTQgMS40MTRMNDEuNTg2IDQzeiIvPjwvZz48L3N2Zz4=',
+    nlb: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvTmV0d29ya2luZy1hbmQtQ29udGVudC1EZWxpdmVyeS9SZXNfRWxhc3RpYy1Mb2FkLUJhbGFuY2luZ19OZXR3b3JrLUxvYWQtQmFsYW5jZXJfNDg8L3RpdGxlPjxwYXRoIGZpbGw9IiM4YzRmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTI0LjAwMiA0NC4wMDNDMTIuOTcyIDQ0LjAwMyA0IDM1LjAzIDQgMjRTMTIuOTczIDQgMjQuMDAyIDRzMjAgOC45NzMgMjAgMjBjMCAxMS4wMy04Ljk3MyAyMC4wMDMtMjAgMjAuMDAzbTAtNDIuMDAzQzExLjg3IDIgMiAxMS44NjkgMiAyNGMwIDEyLjEzMyA5Ljg3IDIyLjAwMyAyMi4wMDIgMjIuMDAzczIyLTkuODcgMjItMjIuMDAyUzM2LjEzNCAyIDI0LjAwMiAybTUuMDgyIDIxLjI5NGExIDEgMCAwIDEgMCAxLjQxNGwtMi45NDMgMi45NDYtMS40MTQtMS40MTRMMjUuOTY1IDI1SDE4Ljc1di0yaDcuMjE1bC0xLjIzOC0xLjIzOCAxLjQxMy0xLjQxNHptMi45MTggMTEuOTU4aDMuMjV2LTMuMjVoLTMuMjV6bTQuMjUtNS4yNWgtNS4yNWExIDEgMCAwIDAtMSAxdjUuMjVhMSAxIDAgMCAwIDEgMWg1LjI1YTEgMSAwIDAgMCAxLTF2LTUuMjVhMSAxIDAgMCAwLTEtMU0xNy42NjYgMTguNzRsNy4yOTYtMy44NS0xLjU2Ny0uNDI1LjUyMy0xLjkzIDQuMDE4IDEuMDg5YTEgMSAwIDAgMSAuNzA0IDEuMjI3bC0xLjA5IDQuMDItMS45My0uNTIyLjQ4OC0xLjgwMy03LjUwNyAzLjk2NHpNMzIuMDAyIDE2aDMuMjV2LTMuMjVoLTMuMjV6bTQuMjUtNS4yNWgtNS4yNWExIDEgMCAwIDAtMSAxVjE3YTEgMSAwIDAgMCAxIDFoNS4yNWExIDEgMCAwIDAgMS0xdi01LjI1YTEgMSAwIDAgMC0xLTFNOC4zNDYgMjcuMzQ3aDYuNjl2LTYuNjloLTYuNjl6bTcuNjktOC42OTFoLTguNjlhMSAxIDAgMCAwLTEgMXY4LjY5YTEgMSAwIDAgMCAxIDFoOC42OWExIDEgMCAwIDAgMS0xdi04LjY5YTEgMSAwIDAgMC0xLTFNMjguNjQgMzMuMTVhMSAxIDAgMCAxLS43MDQgMS4yMjdsLTQuMDE4IDEuMDktLjUyMy0xLjkzIDEuNTY3LS40MjUtNy4yOTYtMy44NS45MzQtMS43NyA3LjUwOCAzLjk2My0uNDg4LTEuODAzIDEuOTMtLjUyM3pNMzIgMjUuNjI2aDMuMjV2LTMuMjVoLTMuMjV6bTQuMjUtNS4yNWgtNS4yNWExIDEgMCAwIDAtMSAxdjUuMjVhMSAxIDAgMCAwIDEgMWg1LjI1YTEgMSAwIDAgMCAxLTF2LTUuMjVhMSAxIDAgMCAwLTEtMSIvPjwvc3ZnPg==',
+    alb: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvTmV0d29ya2luZy1hbmQtQ29udGVudC1EZWxpdmVyeS9SZXNfRWxhc3RpYy1Mb2FkLUJhbGFuY2luZ19BcHBsaWNhdGlvbi1Mb2FkLUJhbGFuY2VyXzQ4PC90aXRsZT48cGF0aCBmaWxsPSIjOGM0ZmZmIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0zMy42OSAzNC4zNzVoMi4zNDVWMzJIMzMuNjl6bS02LjkzOSAwaDIuMzc1VjMyaC0yLjM3NXptLTcuODc1IDBoMi4zNzVWMzJoLTIuMzc1em0tNi45MSAwaDIuMjg1VjMyaC0yLjI4NXptNi4wMzUtMTcuNWgxMlYxMWgtMTJ6TTM3LjAzNSAzMGgtMS41MzR2LTMuMzc1YTEgMSAwIDAgMC0xLTFoLTIuNVYyMi4yNWExIDEgMCAwIDAtMS0xaC02di0yLjM3NWg2YTEgMSAwIDAgMCAxLTFWMTBhMSAxIDAgMCAwLTEtMWgtMTRhMSAxIDAgMCAwLTEgMXY3Ljg3NWExIDEgMCAwIDAgMSAxaDZ2Mi4zNzVoLTZhMSAxIDAgMCAwLTEgMXYzLjM3NWgtMi41YTEgMSAwIDAgMC0xIDFWMzBoLTEuNTM2YTEgMSAwIDAgMC0xIDF2NC4zNzVhMSAxIDAgMCAwIDEgMWg0LjI4NmExIDEgMCAwIDAgMS0xVjMxYTEgMSAwIDAgMC0xLTFoLS43NXYtMi4zNzVoNC4xMjVWMzBoLS43NWExIDEgMCAwIDAtMSAxdjQuMzc1YTEgMSAwIDAgMCAxIDFoNC4zNzVhMSAxIDAgMCAwIDEtMVYzMWExIDEgMCAwIDAtMS0xaC0xLjYyNXYtMy4zNzVhMSAxIDAgMCAwLTEtMWgtMS42MjVWMjMuMjVoMTJ2Mi4zNzVoLTEuNjI1YTEgMSAwIDAgMC0xIDFWMzBoLTEuNjI1YTEgMSAwIDAgMC0xIDF2NC4zNzVhMSAxIDAgMCAwIDEgMWg0LjM3NWExIDEgMCAwIDAgMS0xVjMxYTEgMSAwIDAgMC0xLTFoLS43NXYtMi4zNzVoNC4xMjVWMzBoLS44MTFhMSAxIDAgMCAwLTEgMXY0LjM3NWExIDEgMCAwIDAgMSAxaDQuMzQ1YTEgMSAwIDAgMCAxLTFWMzFhMSAxIDAgMCAwLTEtMU0yNC4wMDEgNDRDMTIuOTcyIDQ0IDQgMzUuMDI4IDQgMjRTMTIuOTcyIDQgMjQuMDAxIDRjMTEuMDI4IDAgMjAgOC45NzIgMjAgMjBzLTguOTcyIDIwLTIwIDIwbTAtNDJDMTEuODY5IDIgMiAxMS44NjkgMiAyNHM5Ljg2OSAyMiAyMi4wMDEgMjJjMTIuMTMgMCAyMi05Ljg2OSAyMi0yMnMtOS44Ny0yMi0yMi0yMiIvPjwvc3ZnPg==',
+    nat: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvTmV0d29ya2luZy1hbmQtQ29udGVudC1EZWxpdmVyeS9SZXNfQW1hem9uLVZQQ19OQVQtR2F0ZXdheV80ODwvdGl0bGU+PHBhdGggZmlsbD0iIzhjNGZmZiIgZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMTMuNjI2IDM1Ljkydi0yLjgzN2wxLjc3NCAxLjQxOXptLS4zNzUtNS43YTEuMDAxIDEuMDAxIDAgMCAwLTEuNjI1Ljc4MXY3YTEuMDAxIDEuMDAxIDAgMCAwIDEuNjI1Ljc4Mmw0LjM3NC0zLjVhMSAxIDAgMCAwIDAtMS41NjJ6bTI0LTMuMzgzdi0zLjkyMmwxLjk2MiAxLjk2em00LjA4My0yLjY2OC00LjM3Ni00LjM3NWExIDEgMCAwIDAtMS43MDYuNzA3djMuMzc1aC03LjYyN3YtOS41YTEgMSAwIDAgMC0xLTFoLTcuNjkzdjJoNi42OTR2OC41SDE4Ljc1djJoNi44NzV2OC41aC02LjY5M3YyaDcuNjk0YTEgMSAwIDAgMCAxLTF2LTkuNWg3LjYyNXYzLjM3NmExIDEgMCAwIDAgMS43MDguNzA3bDQuMzc0LTQuMzc2YTEgMSAwIDAgMCAwLTEuNDE0bS0yNy43MDggMi4xMjd2LTIuODRsMS43NzQgMS40MnptLS4zNzUtNS43MDFhMSAxIDAgMCAwLTEuNjI1Ljc4djcuMDAyYTEuMDAxIDEuMDAxIDAgMCAwIDEuNjI1Ljc4bDQuMzc0LTMuNWExIDEgMCAwIDAgMC0xLjU2MnptLjM3NS00Ljh2LTIuODM4bDEuNzc0IDEuNDE5em0tLjM3NS01LjdhMS4wMDEgMS4wMDEgMCAwIDAtMS42MjUuNzgxdjdhMS4wMDEgMS4wMDEgMCAwIDAgMS42MjUuNzhsNC4zNzQtMy41YTEgMSAwIDAgMCAwLTEuNTYxek0yNCA0NC4wMDNDMTIuOTcxIDQ0LjAwMyA0IDM1LjAzIDQgMjRTMTIuOTczIDQgMjQgNGMxMS4wMyAwIDIwLjAwMiA4Ljk3MyAyMC4wMDIgMjAgMCAxMS4wMy04Ljk3MyAyMC4wMDMtMjAuMDAyIDIwLjAwM00yNCAyQzExLjg2OCAyIDIgMTEuODY5IDIgMjRjMCAxMi4xMzMgOS44NjkgMjIuMDAzIDIyIDIyLjAwMyAxMi4xMzMgMCAyMi4wMDItOS44NyAyMi4wMDItMjIuMDAyUzM2LjEzMyAyIDI0IDIiLz48L3N2Zz4=',
+    peer: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvTmV0d29ya2luZy1hbmQtQ29udGVudC1EZWxpdmVyeS9SZXNfQW1hem9uLVZQQ19QZWVyaW5nLUNvbm5lY3Rpb25fNDg8L3RpdGxlPjxwYXRoIGZpbGw9IiM4YzRmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTMwLjYwNiAyNS42MzdjMC0uMzgzIDAtMS40MDEtMS42Ny0xLjc0M2ExIDEgMCAwIDEtLjc5OS0uOTIyYy0uMDM4LS42NTctLjMwOC0xLjA2NS0uNzA2LTEuMDY1YS42MS42MSAwIDAgMC0uNDgzLjI1OC45OTguOTk4IDAgMCAxLTEuNzQtLjI1OGMtLjE5NS0uNTQxLS40ODEtMS4wMDYtLjgyNi0xLjM0Ni0uMzE3LS4zMTQtMS4wNC0uODkyLTIuMDY1LS44OTItLjM2IDAtLjc1OS4wNzItMS4xODkuMjUtLjkyLjM4NS0xLjY2OSAxLjUzOC0xLjY2OSAyLjU3cTAgLjE4My4wMjEuMzU3YTEgMSAwIDAgMS0uNzQ4IDEuMDg4Yy0uODg2LjIyMy0xLjMzNC43ODctMS4zMzQgMS42NzhsLjAwNS4xNDZjLjA0NS44MjggMS4wMTYgMS41ODkgMi4wMzYgMS41ODloOS4zOWMxLjc3NiAwIDEuNzc2LTEuMjg3IDEuNzc2LTEuNzFtMiAwYzAgMi42OC0xLjkzIDMuNjY4LTMuNjMgMy43MDlIMTkuNDRjLTIuMDg0IDAtMy45My0xLjU5Ni00LjAzMy0zLjQ4NmE0IDQgMCAwIDEtLjAwOC0uMjQ4YzAtMS41MzUuNzU5LTIuNzM4IDIuMDY3LTMuMzQ0LjA5Ni0xLjc1NyAxLjMwOC0zLjUzMiAyLjg5My00LjE5NCAxLjkyMS0uNzk3IDMuOTQ4LS40MDIgNS40MyAxLjA2NXEuNDE4LjQxMi43NDQuOTNjMS4yNDctLjQ3IDMuMDI0LjA4OSAzLjQ5NyAyLjA1MiAxLjY0Ni41NjIgMi41NzYgMS44MTQgMi41NzYgMy41MTZNNDQgMjRDNDQuMDAyIDEyLjk3MyAzNS4wMyA0IDI0LjAwMiA0cy0yMCA4Ljk3My0yMCAyMGMwIDExLjAzIDguOTcxIDIwLjAwMiAyMCAyMC4wMDJzMjAtOC45NzIgMjAtMjAuMDAxbTIgMGMwIDEyLjEzMi05Ljg2OCAyMi0yMiAyMnMtMjItOS44NjgtMjItMjJTMTEuODcgMiAyNCAyczIyIDkuODY5IDIyIDIybS0zNC4zMjctMy42MzctMS40MTUtMS40MTQtNC4zNDQgNC4zNDRhMSAxIDAgMCAwIDAgMS40MTRsNC4zNDQgNC4zNDYgMS40MTUtMS40MTRMOS4wMzYgMjVoNC45NTV2LTJIOS4wMzZ6bTMwLjQxNSAyLjkzLTQuMzQ2LTQuMzQ0LTEuNDEzIDEuNDE0TDM4Ljk2OCAyM2gtNC45ODN2Mmg0Ljk4M2wtMi42MzkgMi42MzkgMS40MTQgMS40MTQgNC4zNDYtNC4zNDZhLjk5Ni45OTYgMCAwIDAgMC0xLjQxNE0yNS4wMDIgMzguOTY4di03Ljk5MmgtMnY3Ljk5MmwtMi42MzktMi42NC0xLjQxMyAxLjQxNSA0LjM0NCA0LjM0NmExIDEgMCAwIDAgMS40MTUgMGw0LjM0NS00LjM0Ni0xLjQxNC0xLjQxNHptLTQuNjM5LTI3LjI5NS0xLjQxMy0xLjQxNCA0LjM0NC00LjM0NWExIDEgMCAwIDEgMS40MTUgMGw0LjM0NSA0LjM0NS0xLjQxNCAxLjQxNEwyNSA5LjAzNXY3LjI0aC0ydi03LjI0eiIvPjwvc3ZnPg==',
+    nacl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvTmV0d29ya2luZy1hbmQtQ29udGVudC1EZWxpdmVyeS9SZXNfQW1hem9uLVZQQ19OZXR3b3JrLUFjY2Vzcy1Db250cm9sLUxpc3RfNDg8L3RpdGxlPjxwYXRoIGZpbGw9IiM4YzRmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTMyLjYyNSAzNS4zNzZoMlYxMi42MjVoLTJ6bS0xOS4yNSAwaDJWMTIuNjI1aC0yem0yNi4yNS05Ljg5LTEuNzgyLTEuNDg1IDEuNzgyLTEuNDg2em0xLjQyNC02LjAxMWExIDEgMCAwIDAtMS4wNjUuMTM2bC00LjM0NCAzLjYyMWExLjAwMyAxLjAwMyAwIDAgMCAwIDEuNTM4bDQuMzQ1IDMuNjJhMSAxIDAgMCAwIDEuMDY0LjEzNiAxIDEgMCAwIDAgLjU3Ni0uOTA1VjIwLjM4YTEgMSAwIDAgMC0uNTc2LS45MDVNOC4zNzUgMjUuNDg2di0yLjk3MWwxLjc4MiAxLjQ4NnptLS4zNTktNS44NzVhMS4wMDMgMS4wMDMgMCAwIDAtMS42NDEuNzY5djcuMjQxYTEgMSAwIDAgMCAxLjY0Ljc2OWw0LjM0NS0zLjYyYTEuMDAzIDEuMDAzIDAgMCAwIDAtMS41Mzh6TTI0IDQ0LjAwMWMtMTEuMDI4IDAtMjAtOC45NzItMjAtMjBTMTIuOTcyIDQgMjQgNHMyMCA4Ljk3MyAyMCAyMC4wMDEtOC45NzIgMjAtMjAgMjBNMjQgMkMxMS44NjkgMiAyIDExLjg2OSAyIDI0LjAwMWMwIDEyLjEzMSA5Ljg2OSAyMiAyMiAyMnMyMi05Ljg2OSAyMi0yMlMzNi4xMzEgMiAyNCAybTQuMjQ2IDI3LjEyNi04LjQ5Ni0uMDA1LjAwMi02Ljc0NSA4LjQ5OC4wMDR6bS01Ljg2Ny0xMC4wNzVjLjAwMi0uNTUyLjE4Ny0xLjA2NC41MjMtMS40NDMuMzA0LS4zNC42OTYtLjUyOSAxLjEwNS0uNTI5aC4wMDVjLjg4OS4wMDMgMS42MS44OTggMS42MDcgMS45OTdsLS4wMDEgMS4zMDMtMy4yNDUtLjAwMnptNi44NzEgMS4zMjktMS42MzItLjAwMS4wMDEtMS4zYy4wMDctMi4xOTktMS42MDktMy45OTMtMy42MDEtNGgtLjAxMWMtLjk4OSAwLTEuOTEyLjQyNy0yLjYwMSAxLjIwMmE0LjE3IDQuMTcgMCAwIDAtMS4wMjcgMi43NjJsLS4wMDYgMS4zMzQtMS42MjEtLjAwMWEuOTk3Ljk5NyAwIDAgMC0xIDFsLS4wMDIgOC43NDVhMSAxIDAgMCAwIDEgMWwxMC40OTYuMDA1YS45OTcuOTk3IDAgMCAwIDEtMWwuMDA0LTguNzQ2YS45OTcuOTk3IDAgMCAwLTEtMSIvPjwvc3ZnPg==',
+    zone: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvTmV0d29ya2luZy1hbmQtQ29udGVudC1EZWxpdmVyeS9SZXNfQW1hem9uLVJvdXRlLTUzLUhvc3RlZC1ab25lXzQ4PC90aXRsZT48cGF0aCBmaWxsPSIjOGM0ZmZmIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0zMy40NDkgMzkuMzY0Yy00LjU2NC44Mi04LjQxNSAzLjIyMS05Ljg2NCA0LjIyLTEuNDUtLjk5OS01LjMtMy40LTkuODY1LTQuMjJDMTEuNDQgMzguOTU1IDQgMzcuMTM2IDQgMzAuOTI1YzAtMi41OTYuOTgzLTQuMjkgMi4wMjQtNi4wODIuOTgtMS42ODkgMS45OTItMy40MzMgMS45OTItNS44MjMgMC0zLjU4Ni0xLjk3NS02LjE2Ny0zLjA4OC03LjMzNiAxLjEzMy0xLjM3OCAzLjYtNC4zODcgNC45NjQtNi4xMzIgMi4wNzkgMS44OSA0LjQ3OSAyLjkxOCA2Ljg1NSAyLjkxOCAyLjY0NiAwIDQuODQ1LTEuMDQgNi44MzgtMy4yNTggMS45OTIgMi4yMTcgNC4xOSAzLjI1OCA2LjgzOCAzLjI1OCAyLjM3NiAwIDQuNzc0LTEuMDI4IDYuODUzLTIuOTE4IDEuMzY0IDEuNzQ0IDMuODMgNC43NTQgNC45NjUgNi4xMzItMS4xMTMgMS4xNy0zLjA5IDMuNzUtMy4wOSA3LjMzNiAwIDIuMzkgMS4wMTQgNC4xMzQgMS45OTMgNS44MjMgMS4wNCAxLjc5MiAyLjAyNSAzLjQ4NiAyLjAyNSA2LjA4MiAwIDYuMjExLTcuNDQgOC4wMy05LjcyIDguNDRtOS40MjYtMTUuNTI3Yy0uOTI1LTEuNTkyLTEuNzIzLTIuOTY3LTEuNzIzLTQuODE4IDAtMy45MSAzLjA1Mi02LjQ1MyAzLjA4LTYuNDc2bC43ODYtLjYzNS0uNjQyLS43NzljLS4wNTEtLjA2LTUuMDQ0LTYuMTEzLTYuMTg2LTcuNjc2bC0uNzEzLS45NzYtLjgyNS44ODNjLTEuODc2IDIuMDA1LTQuMDg4IDMuMTEtNi4yMyAzLjExLTIuMzYyIDAtNC4yMjUtMS4wNTktNi4wNDMtMy40MzRMMjMuNTg1IDJsLS43OTQgMS4wMzZjLTEuODIgMi4zNzUtMy42ODMgMy40MzQtNi4wNDQgMy40MzQtMi4xNDMgMC00LjM1NS0xLjEwNC02LjIzMS0zLjEwOWwtLjgyNi0uODg0LS43MTIuOTc4Yy0xLjE0IDEuNTYyLTYuMTMzIDcuNjE0LTYuMTg0IDcuNjc1bC0uNjQzLjc4Ljc4NS42MzRjLjAzMi4wMjUgMy4wOCAyLjUzNiAzLjA4IDYuNDc2IDAgMS44NTEtLjc5NyAzLjIyNi0xLjcyMiA0LjgxOEMzLjIxOSAyNS42OTEgMiAyNy43OTEgMiAzMC45MjVjMCA1LjI0IDQuMjQ5IDkuMTMgMTEuMzY3IDEwLjQwOCA1LjIwNS45MzQgOS41NjUgNC4yNCA5LjYwOSA0LjI3M2wuNjEuNDY2LjYwNy0uNDY2Yy4wNDQtLjAzMyA0LjQwNC0zLjMzOSA5LjYxLTQuMjczIDcuMTE3LTEuMjc4IDExLjM2Ni01LjE2OCAxMS4zNjYtMTAuNDA4IDAtMy4xMzQtMS4yMi01LjIzNC0yLjI5NC03LjA4NyIvPjwvc3ZnPg==',
+    users: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvR2VuZXJhbC1SZXNvdXJjZS9SZXNfVXNlcnNfNDhfTGlnaHQ8L3RpdGxlPjxwYXRoIGZpbGw9IiMyNDJmM2UiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTI4LjYzOSA5LjI4NmMwLTIuOTE1IDIuNDEzLTUuMjg2IDUuMzgtNS4yODZzNS4zNzggMi4zNzEgNS4zNzggNS4yODYtMi40MTIgNS4yODYtNS4zNzggNS4yODYtNS4zOC0yLjM3MS01LjM4LTUuMjg2bTExLjUyNCA3LjA0OGExMS43IDExLjcgMCAwIDAtMi4wMzUtMS4wMDFjMS45Ny0xLjMxIDMuMjY5LTMuNTMxIDMuMjY5LTYuMDQ3IDAtNC4wMTctMy4zMS03LjI4Ni03LjM3OC03LjI4Ni00LjA2OSAwLTcuMzggMy4yNjktNy4zOCA3LjI4NiAwIDIuNTEgMS4yOTMgNC43MjggMy4yNTYgNi4wMzlhMTEuOSAxMS45IDAgMCAwLTMuNTQ2IDIuMWwxLjMwMyAxLjUxOEE5Ljc3IDkuNzcgMCAwIDEgMzQgMTYuNTcyYzEuODAyIDAgMy41NjkuNTA1IDUuMTA5IDEuNDYxIDIuNzQgMS43MDIgNC41MzggNC42OTIgNC44NDQgNy45NjdIMzR2MmgxMWExIDEgMCAwIDAgMS0xYzAtNC4zNDMtMi4yMzYtOC40My01LjgzNy0xMC42NjZNOC42MzkgOS4yODZDOC42MzkgNi4zNzEgMTEuMDUyIDQgMTQuMDE5IDRzNS4zNzggMi4zNzEgNS4zNzggNS4yODYtMi40MTIgNS4yODYtNS4zNzggNS4yODYtNS4zOC0yLjM3MS01LjM4LTUuMjg2TTE0IDI2SDQuMDQ2QzQuNTMgMjAuNzE3IDguODEgMTYuNTcyIDE0IDE2LjU3MmMxLjgwMiAwIDMuNTY5LjUwNSA1LjEwOSAxLjQ2MS40MzIuMjY5Ljg0OS41NzUgMS4yNC45MWwxLjMwMy0xLjUxN2ExMS43MSAxMS43MSAwIDAgMC0zLjUyNC0yLjA5M2MxLjk3LTEuMzEgMy4yNjktMy41MzEgMy4yNjktNi4wNDcgMC00LjAxNy0zLjMxLTcuMjg2LTcuMzc4LTcuMjg2LTQuMDY5IDAtNy4zOCAzLjI2OS03LjM4IDcuMjg2IDAgMi41MTUgMS4yOTggNC43MzcgMy4yNjggNi4wNDZDNS4zMDIgMTcuMDcxIDIgMjEuNjM4IDIgMjdhMSAxIDAgMCAwIDEgMWgxMXptLjA0NiAxOGMuNDg0LTUuMjgzIDQuNzY0LTkuNDI4IDkuOTU0LTkuNDI4IDEuODAyIDAgMy41NjkuNTA1IDUuMTA5IDEuNDYxIDIuNzQgMS43MDIgNC41MzggNC42OTIgNC44NDQgNy45Njd6bTQuNTkzLTE2LjcxNGMwLTIuOTE1IDIuNDEzLTUuMjg2IDUuMzgtNS4yODZzNS4zNzggMi4zNzEgNS4zNzggNS4yODYtMi40MTIgNS4yODYtNS4zNzggNS4yODYtNS4zOC0yLjM3MS01LjM4LTUuMjg2bTExLjUyNCA3LjA0OGExMS43IDExLjcgMCAwIDAtMi4wMzUtMS4wMDFjMS45Ny0xLjMxIDMuMjY5LTMuNTMxIDMuMjY5LTYuMDQ3IDAtNC4wMTctMy4zMS03LjI4Ni03LjM3OC03LjI4Ni00LjA2OSAwLTcuMzggMy4yNjktNy4zOCA3LjI4NiAwIDIuNTE1IDEuMjk4IDQuNzM3IDMuMjY4IDYuMDQ2QzE1LjMwMiAzNS4wNzEgMTIgMzkuNjM4IDEyIDQ1YTEgMSAwIDAgMCAxIDFoMjJhMSAxIDAgMCAwIDEtMWMwLTQuMzQzLTIuMjM2LTguNDMtNS44MzctMTAuNjY2Ii8+PC9zdmc+',
+    client: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvR2VuZXJhbC1SZXNvdXJjZS9SZXNfQ2xpZW50XzQ4X0xpZ2h0PC90aXRsZT48cGF0aCBmaWxsPSIjMjMyZjNkIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik00Mi4yOTkgMzguNzczdjEuOTIzYS43OTMuNzkzIDAgMCAxLS43OTMuNzk0SDMwLjc2MmEuNzk0Ljc5NCAwIDAgMS0uNzk0LS43OTR2LTEuOTIzYzAtLjQzOC4zNTUtLjc5My43OTQtLjc5M2gxMC43NDRjLjQzOSAwIC43OTMuMzU1Ljc5My43OTNtMS40OTggMy42MjZhLjY0Ni42NDYgMCAwIDEtLjY0NC42NDVINC42NDVBLjY0Ni42NDYgMCAwIDEgNCA0Mi4zOTl2LTUuMzg4YzAtLjM1NS4yODktLjY0NC42NDUtLjY0NGgzOC41MDhjLjM1NSAwIC42NDQuMjg5LjY0NC42NDR6bS0uNjQ0LTguMDMySDQuNjQ1QTIuNjUgMi42NSAwIDAgMCAyIDM3LjAxMXY1LjM4OGEyLjY1IDIuNjUgMCAwIDAgMi42NDUgMi42NDVoMzguNTA4YTIuNjUgMi42NSAwIDAgMCAyLjY0NC0yLjY0NXYtNS4zODhhMi42NDcgMi42NDcgMCAwIDAtMi42NDQtMi42NDRNNy41MDEgMjcuMjFoMzIuNzYzVjcuNTAySDcuNTAxek00MC44NDIgNS41MDJINi45MjRjLS43ODQgMC0xLjQyMy42MzctMS40MjMgMS40MjF2MjAuODY1YzAgLjc4NC42MzkgMS40MjIgMS40MjMgMS40MjJoMzMuOTE4Yy43ODQgMCAxLjQyMi0uNjM4IDEuNDIyLTEuNDIyVjYuOTIzYzAtLjc4NC0uNjM4LTEuNDIxLTEuNDIyLTEuNDIxbTIuOTU1IDI0LjU2NWEuNjQ1LjY0NSAwIDAgMS0uNjQ0LjY0NEg0LjY0NUEuNjQ1LjY0NSAwIDAgMSA0IDMwLjA2N1Y0LjY0NEM0IDQuMjg5IDQuMjg5IDQgNC42NDUgNGgzOC41MDhjLjM1NSAwIC42NDQuMjg5LjY0NC42NDR6TTQzLjE1MyAySDQuNjQ1QTIuNjUgMi42NSAwIDAgMCAyIDQuNjQ0djI1LjQyM2EyLjY1IDIuNjUgMCAwIDAgMi42NDUgMi42NDRoMzguNTA4YTIuNjQ3IDIuNjQ3IDAgMCAwIDIuNjQ0LTIuNjQ0VjQuNjQ0QTIuNjQ3IDIuNjQ3IDAgMCAwIDQzLjE1MyAyIi8+PC9zdmc+',
+    app: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvR2VuZXJhbC1SZXNvdXJjZS9SZXNfR2VuZXJpYy1BcHBsaWNhdGlvbl80OF9MaWdodDwvdGl0bGU+PHBhdGggZmlsbD0iIzIzMmYzZCIgZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMzcgMzVoOXYyaC05djloLTJ2LTloLTl2LTJoOXYtOWgyek00IDQ0aDE2VjI4SDR6bTE3LTE4SDNhMSAxIDAgMCAwLTEgMXYxOGExIDEgMCAwIDAgMSAxaDE4YTEgMSAwIDAgMCAxLTFWMjdhMSAxIDAgMCAwLTEtMW03LTZoMTZWNEgyOHpNNDUgMkgyN2ExIDEgMCAwIDAtMSAxdjE4YTEgMSAwIDAgMCAxIDFoMThhMSAxIDAgMCAwIDEtMVYzYTEgMSAwIDAgMC0xLTFNNCAyMGgxNlY0SDR6TTIxIDJIM2ExIDEgMCAwIDAtMSAxdjE4YTEgMSAwIDAgMCAxIDFoMThhMSAxIDAgMCAwIDEtMVYzYTEgMSAwIDAgMC0xLTEiLz48L3N2Zz4=',
+    internet: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHRpdGxlPkljb24tUmVzb3VyY2UvR2VuZXJhbC1SZXNvdXJjZS9SZXNfSW50ZXJuZXRfNDhfTGlnaHQ8L3RpdGxlPjxwYXRoIGZpbGw9IiMyMzJmM2QiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0ibTM0LjU5IDI5Ljc5LTMuNTkzIDMuNTkxVjIxLjc2aC0yVjMzLjI3bC0zLjQ0MS0zLjQ5Ny0xLjQyNiAxLjQwMyA1LjE5NSA1LjI4Yy4xODguMTkuNDQzLjI5Ny43MDkuMjk4aC4wMDRjLjI2NSAwIC41Mi0uMTA2LjcwNy0uMjkzbDUuMjU5LTUuMjU4em0tMTIuMjQtMi4wNjYgMS40MTQtMS40MTQtNS4yNTgtNS4yNThhMSAxIDAgMCAwLS43MDctLjI5M2gtLjAwNGExIDEgMCAwIDAtLjcwOS4zbC01LjE5NiA1LjI3NyAxLjQyNiAxLjQwMiAzLjQ0MS0zLjQ5NXYxMy4zMTFoMlYyNC4xMzF6bS0yLjAxNyA5Ljg0OCA3LjA2Ny4wMDcuMDAyLTItNy4wNjctLjAwN3ptMjUuNjkzLTguNDQyYzAgMi40ODctLjc1NCA0LjQ5OC0yLjI0MyA1Ljk3NS0yLjQ1MSAyLjQzNS02LjAwNyAyLjQ4NS02LjI4NyAyLjQ4NWgtLjAxMmwtNC43NjMtLjAwNS4wMDItMiA0Ljc2OC4wMDVjLjA0IDAgMi45OTgtLjAyIDQuODk0LTEuOTE0IDEuMDg5LTEuMDg4IDEuNjQxLTIuNjE3IDEuNjQxLTQuNTQ2IDAtMS4xODItLjMyNS0yLjk1LTMuMTMtNC42Ny0xLjQ3NC0uOTAzLTIuODU1LTEuMi0zLjM3OS0xLjI4NmExIDEgMCAwIDEtLjgzMi0xLjEwNWMtLjE3OC0yLjA5NS0xLjE1OS0zLjU2LTIuNzAzLTQuMDI5LTEuMzM1LS40MDQtMi43NjQuMDY4LTMuNjQ1IDEuMjA0YS45OS45OSAwIDAgMS0uOTQxLjM3NiAxIDEgMCAwIDEtLjc4Ni0uNjRjLS42MTgtMS42NjYtMS41MTEtMy4wNjMtMi42NTUtNC4xNTctMS40MS0xLjM0OC01LjI4LTQuMjQ5LTEwLjc1MS0yLjAzOS0zLjEzNSAxLjI2Ny01LjU5MyA0LjkwNS01LjU5MyA4LjI4MyAwIC4zNzcuMDI0Ljc1NS4wNzEgMS4xMjJhMSAxIDAgMCAxLS44MTcgMS4xMTFDNy4wMiAyMy43NjQgNCAyNS4xNTcgNCAyOS4yOThjMCAzLjE0NSAxLjc5OSA0Ljg4NCAzLjMwOCA1Ljc5YTMuMzYgMy4zNiAwIDAgMCAxLjcyMS40NzNsNi4xNTIuMDA2LS4wMDIgMi02LjE1MS0uMDA2YTUuMzUgNS4zNSAwIDAgMS0yLjc1LS43NTlDNC42ODEgMzUuODQ0IDIgMzMuNTk1IDIgMjkuMjk4YzAtMy43MTUgMi4wODQtNi41NDcgNS42MjMtNy43MTlxLS4wMTItLjI1NS0uMDEyLS41MTJjMC00LjIwNCAyLjk0My04LjU2MiA2Ljg0NS0xMC4xMzcgNC41NDUtMS44MzcgOS4zNjEtLjkxOSAxMi44ODIgMi40NDggMS4wMzIuOTg2IDEuODkgMi4xNzIgMi41NTkgMy41MzZhNS4zIDUuMyAwIDAgMSA0LjY2NS0uNzg4YzIuMTg5LjY2NCAzLjY3MiAyLjU5NyA0LjA1MyA1LjIzNCAxLjEzMy4yODIgMi4zMS43NzIgMy4zMjYgMS4zOTUgMi43NDkgMS42ODMgNC4wODUgMy43NyA0LjA4NSA2LjM3NSIvPjwvc3ZnPg==',
+    cloud: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MCA0MCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLUdyb3VwLzMyL0FXUy1DbG91ZC1sb2dvXzMyPC90aXRsZT48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGZpbGw9IiMyNDJmM2UiIGQ9Ik0wIDBoNDB2NDBIMHoiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMzIuNjk4IDIzLjljLjM2MS40Ny0uNCAyLjQtLjc0IDMuMjY0LS4xMDUuMjYyLjExNy4zNjUuMzUuMTY4IDEuNTEyLTEuMjg0IDEuOTA0LTMuOTc1IDEuNTkzLTQuMzYzLS4zMDctLjM4Ni0yLjk1LS43MTctNC41NjMuNDMyLS4yNDkuMTc3LS4yMDYuNDIuMDcuMzg5LjkwNy0uMTEyIDIuOTMtLjM1NyAzLjI5LjExbS0uODQyIDIuMDFjLjUxOC0uMzc4LjA3NC0uOTQxLS40NTQtLjcyLTMuNTEzIDEuNDY0LTcuMzI3IDIuMTczLTEwLjggMi4xNzMtNS4xNDMgMC0xMC4xMjctMS4zOS0xNC4xNTYtMy42OTUtLjM1Mi0uMjAyLS42MTMuMTU1LS4zMTkuNDE0IDMuNzMzIDMuMzE2IDguNjcgNS4zMDkgMTQuMTQ3IDUuMzA5IDMuOTEgMCA4LjQ1MS0xLjIwOCAxMS41ODItMy40ODFtLTIuMTQ0LTUuMjE1YTYuNiA2LjYgMCAwIDEtMS40NTktLjE2MXEtLjcxNC0uMTYzLTEuMDkzLS4zNzMtLjIzMy0uMTI4LS4yOS0uMjU4YS43LjcgMCAwIDEtLjA1OS0uMjZ2LS40N3EwLS4yOS4yMTYtLjI5Mi4wODMuMDAyLjE3My4wMzMuMDkxLjAzNC4yNDEuMDk4LjQ4LjIxIDEuMDQ0LjMyNC41NjQuMTEzIDEuMTI2LjExMy44OTUgMCAxLjM4NC0uMzA4YS45Ny45NyAwIDAgMCAuNDktLjg3My44OC44OCAwIDAgMC0uMjU4LS42NXEtLjI1Ni0uMjU4LS45NTItLjQ4NGwtMS4zNzUtLjQyMXEtMS4wNDUtLjMyNS0xLjUxNy0uOTM4YTIuMTcgMi4xNyAwIDAgMS0uNDcyLTEuMzQ3cTAtLjU4MS4yNTgtMS4wMjcuMjU1LS40NDUuNjc2LS43NjEuNDI3LS4zMTQuOTktLjQ3OEE0LjMgNC4zIDAgMCAxIDMwLjAyNSAxMnEuMzE1IDAgLjY0LjA0YTYuMyA2LjMgMCAwIDEgMS4xNS4yNTJxLjI0OC4wODIuNC4xNjJhLjkuOSAwIDAgMSAuMjguMjI3LjUuNSAwIDAgMSAuMDgzLjMwOHYuNDM2cTAgLjI5MS0uMjE3LjI5LS4xMTQuMDAyLS4zNjQtLjExMWMtLjU0LS4yNC0xLjE1LS4zNTYtMS44Mi0uMzU2cS0uODE1IDAtMS4yNjIuMjU4LS40NDguMjYtLjQ0OC44MjcgMCAuMzg4LjI4My42NTUuMjgxLjI2NyAxLjA0NC41MWwxLjM0Mi40MjNxMS4wMjguMzIyIDEuNDY2Ljg4OC40NDEuNTY4LjQ0MSAxLjI5NSAwIC42LS4yNSAxLjA3OC0uMjQ4LjQ3Ny0uNjg5LjgxN2EzLjEgMy4xIDAgMCAxLTEuMDUuNTE4cS0uNjE1LjE3OS0xLjM0My4xNzhtLTEyLjE2NS0uMjQ0cS0uMjQ4LjAwMi0uMzY1LS4wODctLjExNy0uMDktLjE5OS0uMzY1bC0yLjIyMi03LjE1N2ExLjggMS44IDAgMCAxLS4wODItLjM3MXEwLS4yMjcuMjMzLS4yMjdoLjkyN3EuMjY1IDAgLjM3NC4wOS4xMDYuMDg2LjE5LjM2NGwxLjU5IDYuMTIgMS40NzctNi4xMnEuMDY2LS4yNzguMTgxLS4zNjQuMTE2LS4wOS4zOC0uMDloLjc2NXEuMjYzIDAgLjM4LjA5LjExNi4wODYuMTgyLjM2NGwxLjQ5MyA2LjIgMS42NC02LjJxLjA4Mi0uMjc4LjE5LS4zNjQuMTA5LS4wOS4zNzMtLjA5aC44NzhxLjIzMyAwIC4yMzMuMjI3YTEgMSAwIDAgMS0uMDE2LjE0NCAyIDIgMCAwIDEtLjA2OC4yMjdsLTIuMjg2IDcuMTU3cS0uMDgzLjI3NS0uMi4zNjUtLjExNi4wODgtLjM2NC4wODdoLS44MTNxLS4yNjQuMDAxLS4zOC0uMDk0LS4xMTYtLjA5OS0uMTgyLS4zNzNsLTEuNDc2LTUuOTYtMS40NTcgNS45NnEtLjA2Ny4yNzQtLjE4My4zNzMtLjExNi4wOTUtLjM4LjA5NHpNOS45NCAxOS40NDlxLjQ2NSAwIC45OC0uMTcuNTEzLS4xNy44OTMtLjU5Mi4yMzItLjI1OS4zMjQtLjU5MS4wOS0uMzMuMDktLjgwMXYtLjM4OGE4IDggMCAwIDAtMS43NTctLjIxMXEtLjk0NSAwLTEuNDA4LjM3My0uNDY0LjM3LS40NjUgMS4wNyAwIC42NDUuMzUuOTc4LjM0Ny4zMzIuOTkzLjMzMm0zLjg0Ni0xLjQwOHEwIC41MTcuMTA3LjgyNS4xMS4zMS4zMDcuNjY0YS40LjQgMCAwIDEgLjA2Ni4yMDlxMCAuMTQ4LS4xODIuMjc2bC0uNTk3LjM5YS41LjUgMCAwIDEtLjI0OC4wOC40LjQgMCAwIDEtLjI4Mi0uMTI4IDIgMiAwIDAgMS0uMzM5LS40MyA2IDYgMCAwIDEtLjI5LS41NDRxLTEuMTEyIDEuMjgtMi43ODUgMS4yOC0xLjE5NC4wMDEtMS44OS0uNjY0LS42OTYtLjY2NC0uNjk2LTEuNzggMC0xLjE4Mi44NjMtMS45MDMuODYtLjcyIDIuMzItLjcyMS40OCAwIDEuMDAyLjA3M3QxLjA4NC4yMDN2LS42OHEuMDAxLTEuMDUyLS40NDYtMS40ODItLjQ0Ni0uNDI4LTEuNTQtLjQyOGE0LjUgNC41IDAgMCAwLTEuMDIuMTIgNy41IDcuNSAwIDAgMC0xLjAyLjMxNSAzIDMgMCAwIDEtLjMzLjEyMi43LjcgMCAwIDEtLjE1LjAyNHEtLjE5OS4wMDEtLjItLjI5MnYtLjQ1MnEuMDAxLS4yMjguMDY4LS4zMjMuMDY2LS4wOTkuMjY1LS4xOTVhNiA2IDAgMCAxIDEuMTkyLS40MjEgNiA2IDAgMCAxIDEuNDc2LS4xOGMxLjEyNiAwIDEuOTUyLjI1NCAyLjQ3Ny43NTRxLjc4Ny43NTMuNzg4IDIuMjc1eiIvPjwvZz48L3N2Zz4=',
+    region: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MCA0MCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLUdyb3VwLzMyL1JlZ2lvbl8zMjwvdGl0bGU+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48cGF0aCBmaWxsPSIjMDBhNGE2IiBkPSJNMCAwaDQwdjQwSDB6Ii8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTE0IDIwLjAyNnYtOWgxNS4yOTNsLTQuMTQ3IDQuMTQ2YS41LjUgMCAwIDAgMCAuNzA4bDQuMTQ3IDQuMTQ2em0xMi4yMDctNC41IDQuNjQ3LTQuNjQ2YS41LjUgMCAwIDAtLjM1NC0uODU0SDE0VjguOTdBMS41MjggMS41MjggMCAwIDAgMTMuNDk1IDZjLS44NDUgMC0xLjUzMi42ODctMS41MzIgMS41MzEgMCAuNjcuNDM1IDEuMjM1IDEuMDM3IDEuNDQydjI0LjA1M2gtM3YxaDd2LTFoLTN2LTEyaDE2LjVhLjUuNSAwIDAgMCAuMzU0LS44NTR6Ii8+PC9nPjwvc3ZnPg==',
+    vpc: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MCA0MCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLUdyb3VwLzMyL1ZpcnR1YWwtcHJpdmF0ZS1jbG91ZC1WUENfMzI8L3RpdGxlPjxnIGZpbGw9Im5vbmUiIGZpbGwtcnVsZT0iZXZlbm9kZCI+PHBhdGggZmlsbD0iIzhjNGZmZiIgZD0iTTAgMGg0MHY0MEgweiIvPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Im0zMC45NyAyMS4wMy0yLjk0My0xLjI2NHYxMC40OWMyLjU0NS0uMzUzIDIuOTMyLTIuOTY5IDIuOTQ4LTMuMDg4em0tMy45NDMgOS4yNFYxOS43NmwtMy4wMzUgMS4yNzJ2Ni4yMDFjLjAxMy4wNTQuNDQ1IDIuNzY3IDMuMDM1IDMuMDM2bS4zMDYtMTEuNzIzYS41LjUgMCAwIDEgLjM5LjAwMWwzLjk0NSAxLjY5MmEuNS41IDAgMCAxIC4zMDMuNDZ2Ni41MzNjLS4xODMgMS40NDctMS4zNTcgNC4wNjMtNC41MjcgNC4wNjMtMy4wNzUgMC00LjI1NC0yLjYxMi00LjQ0OC0zLjk5NGwtLjAwNC02LjYwM2MwLS4yLjEyLS4zODMuMzA2LS40NnptNS42NS42MzctNS40NjEtMi40MDYtNS41MyAyLjMyN3Y3LjEyOGMtLjAwMS4wNDItLjA1NCAyLjg2OCAxLjY1NyA0LjYyMy45MTcuOTQxIDIuMTk0IDEuNDIgMy43OTUgMS40MiAxLjYwMiAwIDIuODg3LS40OCAzLjgxOS0xLjQyMyAxLjczNS0xLjc1OCAxLjcyLTQuNTg1IDEuNzItNC42MTN6TTMxLjk4IDMxLjU1Yy0xLjEyNyAxLjE0NC0yLjY1NCAxLjcyNS00LjUzNiAxLjcyNS0xLjg4NCAwLTMuNDA0LS41OC00LjUxNy0xLjcyNy0yLjAwNS0yLjA2My0xLjk0LTUuMTk3LTEuOTM1LTUuMzI5di03LjQ0NmEuNS41IDAgMCAxIC4zMDUtLjQ2bDYuMDM1LTIuNTRhLjUuNSAwIDAgMSAuMzk2LjAwM2w1Ljk1NiAyLjYyNWMuMTgyLjA4LjI5OS4yNi4yOTkuNDU3djcuMzc1Yy4wMDIuMTI1LjAyNyAzLjI1NS0yLjAwMyA1LjMxN20tMjAuOTg4LTcuMzE0aDh2MWgtOGMtMi44MTEgMC00LjgxMS0yLjAxNi00Ljk4LTUuMDE2QTQgNCAwIDAgMSA2IDE5Ljg0MWMwLTIuNTA5IDEuMzE4LTQuMjIzIDMuODE3LTQuOTc5YTggOCAwIDAgMS0uMDMyLS42NDdjMC0yLjkxNiAxLjU3Ny01LjQ0NSA0LjAxNy02LjQ0NSAzLjI5OC0xLjM0OCA3LjA0Mi0uODk0IDkuMTA2IDEuMTA0YTguMiA4LjIgMCAwIDEgMS43NiAyLjQ4NWMuNjA5LS40NSAxLjQtLjY2IDIuMzQ5LS42MTQgMS43OC4wOSAzLjE0OSAxLjcxMyAzLjQzMyA0LjAwNyAxLjQ5OC4xMjQgMi40ODUuODgzIDMuMDEgMi4zMDhsLS45MzcuMzQ2Yy0uNDI4LTEuMTU3LTEuMjA4LTEuNjczLTIuNTMxLTEuNjczYS41LjUgMCAwIDEtLjUtLjQ3Yy0uMTM4LTIuMzM4LTEuNDA2LTMuNDYzLTIuNTI2LTMuNTE5LS45NDUtLjA1My0xLjY0NS4yMi0yLjA4Ljc5MWEuNS41IDAgMCAxLS40NzIuMTkzLjUuNSAwIDAgMS0uMzk1LS4zMjMgNy40IDcuNCAwIDAgMC0xLjgwNy0yLjgxNGMtMS43ODgtMS43My01LjA5LTIuMDk5LTguMDMxLS44OTUtMi4wNjMuODQ1LTMuMzk2IDMuMDExLTMuMzk2IDUuNTIgMCAuMjcyLjAzNS42OTUuMDY2Ljk1OGEuNS41IDAgMCAxLS4zNzYuNTQ0QzguMTY5IDE2LjI5IDcgMTcuNjc4IDcgMTkuODQxYzAgLjEwMS0uMDAxLjIwMS4wMDkuMzAyLjE0IDIuNDk1IDEuNzAzIDQuMDkzIDMuOTgzIDQuMDkzIi8+PC9nPjwvc3ZnPg==',
+    pub: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MCA0MCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLUdyb3VwLzMyL1B1YmxpYy1zdWJuZXRfMzI8L3RpdGxlPjxnIGZpbGw9Im5vbmUiIGZpbGwtcnVsZT0iZXZlbm9kZCI+PHBhdGggZmlsbD0iIzdhYTExNiIgZD0iTTAgMGg0MHY0MEgweiIvPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0xOS41MzYgMjIuMDQ5YzEuMTA2IDAgMi4wMDYuODk5IDIuMDA2IDIuMDA1cy0uOSAyLjAwNi0yLjAwNiAyLjAwNi0yLjAwNi0uOS0yLjAwNi0yLjAwNi45LTIuMDA1IDIuMDA2LTIuMDA1bS0uNTI0IDQuOTU4djMuNDk0aDF2LTMuNDg5YTMgMyAwIDAgMCAyLjUzLTIuOTU4IDMuMDEgMy4wMSAwIDAgMC0zLjAwNi0zLjAwNSAzLjAxIDMuMDEgMCAwIDAtMy4wMDYgMy4wMDUgMy4wMDYgMy4wMDYgMCAwIDAgMi40ODIgMi45NTNNMTAgMzMuMDE0aDE5LjAxMlYxOEgxMHptNC4wNDYtMjAuNTNBNS40OSA1LjQ5IDAgMCAxIDE5LjUyOSA3YTUuNDkgNS40OSAwIDAgMSA1LjQ4MyA1LjQ4NFYxN0gxNC4wNDZ6TTI5LjUxMiAxN2gtMy41di00LjUxNkE2LjQ5IDYuNDkgMCAwIDAgMTkuNTI5IDZhNi40OSA2LjQ5IDAgMCAwLTYuNDgzIDYuNDg0VjE3SDkuNWEuNS41IDAgMCAwLS41LjV2MTYuMDE0YS41LjUgMCAwIDAgLjUuNWgyMC4wMTJhLjUuNSAwIDAgMCAuNS0uNVYxNy41YS41LjUgMCAwIDAtLjUtLjUiLz48L2c+PC9zdmc+',
+    priv: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MCA0MCI+PHRpdGxlPkljb24tQXJjaGl0ZWN0dXJlLUdyb3VwLzMyL1ByaXZhdGUtc3VibmV0XzMyPC90aXRsZT48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGZpbGw9IiMwMGE0YTYiIGQ9Ik0wIDBoNDB2NDBIMHoiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMTkuNTM2IDIyLjA0OWMxLjEwNiAwIDIuMDA2Ljg5OSAyLjAwNiAyLjAwNXMtLjkgMi4wMDYtMi4wMDYgMi4wMDYtMi4wMDYtLjktMi4wMDYtMi4wMDYuOS0yLjAwNSAyLjAwNi0yLjAwNW0tLjUyNCA0Ljk1OHYzLjQ5NGgxdi0zLjQ4OWEzIDMgMCAwIDAgMi41My0yLjk1OCAzLjAxIDMuMDEgMCAwIDAtMy4wMDYtMy4wMDUgMy4wMSAzLjAxIDAgMCAwLTMuMDA2IDMuMDA1IDMuMDA2IDMuMDA2IDAgMCAwIDIuNDgyIDIuOTUzTTEwIDMzLjAxNGgxOS4wMTJWMThIMTB6bTQuMDQ2LTIwLjUzQTUuNDkgNS40OSAwIDAgMSAxOS41MjkgN2E1LjQ5IDUuNDkgMCAwIDEgNS40ODMgNS40ODRWMTdIMTQuMDQ2ek0yOS41MTIgMTdoLTMuNXYtNC41MTZBNi40OSA2LjQ5IDAgMCAwIDE5LjUyOSA2YTYuNDkgNi40OSAwIDAgMC02LjQ4MyA2LjQ4NFYxN0g5LjVhLjUuNSAwIDAgMC0uNS41djE2LjAxNGEuNS41IDAgMCAwIC41LjVoMjAuMDEyYS41LjUgMCAwIDAgLjUtLjVWMTcuNWEuNS41IDAgMCAwLS41LS41Ii8+PC9nPjwvc3ZnPg==',
+    confluent: 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjxzdmcgeG1sbnM6ZGM9Imh0dHA6Ly9wdXJsLm9yZy9kYy9lbGVtZW50cy8xLjEvIiB4bWxuczpjYz0iaHR0cDovL2NyZWF0aXZlY29tbW9ucy5vcmcvbnMjIiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiIHhtbG5zOnN2Zz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6c29kaXBvZGk9Imh0dHA6Ly9zb2RpcG9kaS5zb3VyY2Vmb3JnZS5uZXQvRFREL3NvZGlwb2RpLTAuZHRkIiB4bWxuczppbmtzY2FwZT0iaHR0cDovL3d3dy5pbmtzY2FwZS5vcmcvbmFtZXNwYWNlcy9pbmtzY2FwZSIgd2lkdGg9IjM2MCIgaGVpZ2h0PSIzNzAiIHZpZXdCb3g9IjEgMiAzNiAzNyIgdmVyc2lvbj0iMS4xIiBzb2RpcG9kaTpkb2NuYW1lPSJzdmd2aWV3ZXItb3V0cHV0KDExKS5zdmciIGlua3NjYXBlOnZlcnNpb249IjEuMC4yIChlODZjODcwODc5LCAyMDIxLTAxLTE1KSI+CiAgPGRlZnMvPgogIDxzb2RpcG9kaTpuYW1lZHZpZXcgcGFnZWNvbG9yPSIjZmZmZmZmIiBib3JkZXJjb2xvcj0iIzY2NjY2NiIgYm9yZGVyb3BhY2l0eT0iMSIgb2JqZWN0dG9sZXJhbmNlPSIxMCIgZ3JpZHRvbGVyYW5jZT0iMTAiIGd1aWRldG9sZXJhbmNlPSIxMCIgaW5rc2NhcGU6cGFnZW9wYWNpdHk9IjAiIGlua3NjYXBlOnBhZ2VzaGFkb3c9IjIiIGlua3NjYXBlOndpbmRvdy13aWR0aD0iMTkyMCIgaW5rc2NhcGU6d2luZG93LWhlaWdodD0iMTAwMSIgc2hvd2dyaWQ9ImZhbHNlIiBpbmtzY2FwZTp6b29tPSIwLjU2ODg2NzkyIiBpbmtzY2FwZTpjeD0iMTA2MCIgaW5rc2NhcGU6Y3k9IjIwNSIgaW5rc2NhcGU6d2luZG93LXg9Ii05IiBpbmtzY2FwZTp3aW5kb3cteT0iLTkiIGlua3NjYXBlOndpbmRvdy1tYXhpbWl6ZWQ9IjEiIGlua3NjYXBlOmN1cnJlbnQtbGF5ZXI9InN2ZzgiLz4KICA8ZyBmaWxsPSIjMTczMzYxIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPgogICAgPHBhdGggZD0iTTYyLjA2NSAyMi4xOUg2NGMtLjc1NSAzLjQ3Mi0zLjcwNSA1LjgxLTcuNjQ2IDUuODFDNTEuNzI4IDI4IDQ4IDI0LjU1IDQ4IDE5Ljk4OSA0OCAxNS40MjcgNTEuNzI4IDEyIDU2LjM1NCAxMmMzLjk0IDAgNi44OSAyLjMxNSA3LjY0NiA1Ljc4N2gtMS45MzVjLS42NjEtMi41MTktMi43ODUtNC4xMDctNS43MS00LjEwNy0zLjYzNSAwLTYuNDY3IDIuNy02LjQ2NyA2LjMwOXMyLjgzMiA2LjMzMiA2LjQ2NiA2LjMzMmMyLjkyNiAwIDUuMDUtMS42MzUgNS43MS00LjEzMU04NCAyMGMwIDQuNDU1LTMuNTcgOC04IDhzLTgtMy41NDUtOC04IDMuNTctOCA4LTggOCAzLjU0NSA4IDhtLTEuODA4IDBjMC0zLjUtMi43MTEtNi4zMTgtNi4xOTItNi4zMTgtMy40OCAwLTYuMTkyIDIuODE4LTYuMTkyIDYuMzE4UzcyLjUyIDI2LjMxOCA3NiAyNi4zMTggODIuMTkyIDIzLjUgODIuMTkyIDIwTTEwMyAxMnYxNmgtMS40OGwtOS43NS0xMi42MTJWMjhIOTBWMTJoMS40MzVsOS43OTQgMTIuNzc3VjEyem04Ljg2IDEuNzE4VjE5LjZoOC4xNXYxLjcxN2gtOC4xNVYyOEgxMTBWMTJoMTF2MS43MTh6TTEzOCAyNi4yODJWMjhoLTExVjEyaDEuOTE0djE0LjI4MnptMTctNS4yODhjMCA0LjE4NS0yLjc5IDcuMDA2LTcgNy4wMDZzLTctMi44Mi03LTcuMDA2VjEyaDEuOXY4Ljk5NGMwIDMuMDc1IDIuMDIgNS4yOTUgNS4xIDUuMjk1IDMuMDU1IDAgNS4xLTIuMjIgNS4xLTUuMjk1VjEyaDEuOXptOC44MjYtNy4yNzZWMTkuMmg4LjI1djEuNzE4aC04LjI1djUuMzY1SDE3M1YyOGgtMTFWMTJoMTF2MS43MTh6TTE5MSAxMnYxNmgtMS40OGwtOS43NS0xMi42MTJWMjhIMTc4VjEyaDEuNDM1bDkuNzk0IDEyLjc3N1YxMnptMTkgMS43MThoLTUuNjI2VjI4aC0xLjc3VjEzLjcxOEgxOTdWMTJoMTN6TTI2LjM3NSAyMC45NzVjLjg3NS0uMDQ3IDEuNzUtLjA3NSAyLjYyNS0uMTM5di0uNjcyYy0uODc1LS4wNjQtMS43NS0uMDkyLTIuNjI1LS4xNGwtMi42MjUtLjA4MWMtMS41NC0uMDQ3LTMuMDgtLjA2LTQuNjIyLS4wN2ExODggMTg4IDAgMCAwLS4wNTEtNC42MjNsLS4wNzQtMi42MjVjLS4wNDUtLjg3NS0uMDctMS43NS0uMTMyLTIuNjI1aC0uNzQyYy0uMDYyLjg3NS0uMDg3IDEuNzUtLjEzMiAyLjYyNWwtLjA3MyAyLjYyNWMtLjAyLjcyMy0uMDI5IDEuNDQ3LS4wMzYgMi4xNy0uMjg1LS42NjUtLjU3LTEuMzMtLjg2NS0xLjk5MWwtMS4wNzItMi4zOTdjLS4zNzctLjc5LS43MzUtMS41OS0xLjEyNy0yLjM3NWwtLjY4NC4yODVjLjI3Ny44MzEuNTg5IDEuNjUuODgyIDIuNDc1bC45MzcgMi40NTRjLjI1OC42NzUuNTI2IDEuMzQ2Ljc5NiAyLjAxOGExMzAgMTMwIDAgMCAwLTEuNTYtMS41MDlsLTEuOTA4LTEuODA0Yy0uNjUtLjU4Ny0xLjI4Ny0xLjE4OC0xLjk1LTEuNzYzbC0uNTIzLjUyNGMuNTc0LjY2MyAxLjE3NSAxLjMgMS43NjIgMS45NWwxLjgwNCAxLjkwOHEuNzQ5Ljc4NiAxLjUwOSAxLjU2Yy0uNjcyLS4yNy0xLjM0My0uNTM4LTIuMDE5LS43OTZsLTIuNDUzLS45MzdjLS44MjUtLjI5My0xLjY0NC0uNjA1LTIuNDc2LS44ODNsLS4yODQuNjg1Yy43ODUuMzkyIDEuNTg0Ljc1IDIuMzc1IDEuMTI3bDIuMzk3IDEuMDcyYy42Ni4yOTUgMS4zMjUuNTggMS45OS44NjQtLjcyMy4wMDgtMS40NDYuMDE3LTIuMTcuMDM2bC0yLjYyNC4wNzRjLS44NzUuMDQ1LTEuNzUuMDctMi42MjUuMTMydi43NDJjLjg3NS4wNjIgMS43NS4wODcgMi42MjUuMTMybDIuNjI1LjA3M2MxLjU0Mi4wNDIgMy4wODMuMDQ5IDQuNjI0LjA1Mi4wMSAxLjU0LjAyMiAzLjA4MS4wNjkgNC42MjJsLjA4MiAyLjYyNWMuMDQ3Ljg3NS4wNzUgMS43NS4xMzkgMi42MjVoLjY3MmMuMDY0LS44NzUuMDkyLTEuNzUuMTQtMi42MjVsLjA4MS0yLjYyNWMuMDIzLS43NDEuMDM1LTEuNDgyLjA0Ni0yLjIyM3EuNDM2IDEuMDIyLjg5MiAyLjAzN2wxLjA4IDIuMzkzYy4zNzguNzkuNzM4IDEuNTg4IDEuMTMzIDIuMzczbC42Mi0uMjU5Yy0uMjc1LS44MzItLjU4My0xLjY1MS0uODc1LTIuNDc4bC0uOTMtMi40NTVxLS4zOTUtMS4wNC0uODA4LTIuMDcyLjc5NC43NzcgMS42MDQgMS41NGwxLjkxMyAxLjc5OWMuNjUyLjU4NSAxLjI5IDEuMTg0IDEuOTU1IDEuNzU4bC40NzYtLjQ3NmMtLjU3NC0uNjY0LTEuMTczLTEuMzAzLTEuNzU4LTEuOTU1bC0xLjc5OS0xLjkxNGExMzIgMTMyIDAgMCAwLTEuNTM5LTEuNjAzcTEuMDMxLjQxMyAyLjA3LjgwOWwyLjQ1Ny45MjljLjgyNi4yOTIgMS42NDUuNiAyLjQ3OC44NzZsLjI1OC0uNjIyYy0uNzg1LS4zOTMtMS41ODItLjc1NS0yLjM3My0xLjEzM2wtMi4zOTMtMS4wOGMtLjY3Ni0uMzA0LTEuMzU2LS41OTgtMi4wMzYtLjg5Mi43NC0uMDEgMS40ODEtLjAyMiAyLjIyMi0uMDQ1eiIvPgogICAgPHBhdGggZD0iTTE5IDM3QzkuNjI2IDM3IDIgMjkuMzc0IDIgMjBTOS42MjYgMyAxOSAzczE3IDcuNjI2IDE3IDE3LTcuNjI2IDE3LTE3IDE3bTAtMzIuNDFDMTAuNTAzIDQuNTkgMy41OSAxMS41MDIgMy41OSAyMFMxMC41MDMgMzUuNDEgMTkgMzUuNDEgMzQuNDEgMjguNDk3IDM0LjQxIDIwIDI3LjQ5NyA0LjU5IDE5IDQuNTkiLz4KICA8L2c+Cjwvc3ZnPgo=',
+    kafka: 'data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjMjMxRjIwIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+QXBhY2hlIEthZmthPC90aXRsZT48cGF0aCBkPSJNOS43MSAyLjEzNmExLjQzIDEuNDMgMCAwIDAtMi4wNDcgMGgtLjAwN2ExLjQ4IDEuNDggMCAwIDAtLjQyMSAxLjA0MmMwIC40MS4xNjEuNzc3LjQyMiAxLjAzOWwuMDA3LjAwN2MuMjU3LjI2NC42MTYuNDI2IDEuMDE5LjQyNi40MDQgMCAuNzY2LS4xNjIgMS4wMjctLjQyNmwuMDAzLS4wMDdjLjI2MS0uMjYyLjQyMS0uNjI5LjQyMS0xLjAzOSAwLS40MDgtLjE1OS0uNzc3LS40MjEtMS4wNDJIOS43MXpNOC42ODMgMjIuMjk1Yy40MDQgMCAuNzY2LS4xNjcgMS4wMjctLjQyOWwuMDAzLS4wMDhjLjI2MS0uMjYxLjQyMS0uNjMxLjQyMS0xLjAzNiAwLS40MS0uMTU5LS43NzgtLjQyMS0xLjA0NEg5LjcxYTEuNDIgMS40MiAwIDAgMC0xLjAyNy0uNDMyIDEuNCAxLjQgMCAwIDAtMS4wMi40MzJoLS4wMDdjLS4yNi4yNjYtLjQyMi42MzQtLjQyMiAxLjA0NCAwIC40MDYuMTYxLjc3NS40MjIgMS4wMzZsLjAwNy4wMDhjLjI1OC4yNjIuNjE3LjQyOSAxLjAyLjQyOXptNy44OS00LjQ2MmMuMzU5LS4wOTYuNjgzLS4zMy44ODItLjY4NGwuMDI3LS4wNTJhMS40NyAxLjQ3IDAgMCAwIC4xMTQtMS4wNjcgMS40NTQgMS40NTQgMCAwIDAtLjY3NS0uODk2bC0uMDIxLS4wMTRhMS40MjUgMS40MjUgMCAwIDAtMS4wNzgtLjEzMmMtLjM2LjA5MS0uNjg0LjMzNS0uODgxLjY4Ni0uMi4zNDktLjI0MS43NS0uMTQ2IDEuMTE5LjA5OS4zNjMuMzMuNjkxLjY3NS44OTZoLjAwMmMuMzQ2LjIwMy43MzcuMjM5IDEuMTAxLjE0NHptLTYuNDA1LTcuMzQyYTIuMDgzIDIuMDgzIDAgMCAwLTEuNDg1LS42MjdjLS41OCAwLTEuMTAzLjI0Mi0xLjQ4Mi42MjctLjM3OC4zODUtLjYxMi45MTYtLjYxMiAxLjUwN3MuMjMzIDEuMTI0LjYxMiAxLjUxNGEyLjA4IDIuMDggMCAwIDAgMi45NjcgMGMuMzc5LS4zOS42MTItLjkyMy42MTItMS41MTRzLS4yMzMtMS4xMjItLjYxMi0xLjUwN3ptLS44MzUtMi41MWMuODQzLjE0MSAxLjYuNTUyIDIuMTc4IDEuMTQ0aC4wMDRjLjA5Mi4wOTMuMTgyLjE5Ni4yNjUuMjk5bDEuNDQ2LS44NTFhMy4xNzYgMy4xNzYgMCAwIDEtLjA0Ny0xLjgwOCAzLjE0OSAzLjE0OSAwIDAgMSAxLjQ1Ni0xLjkyNmwuMDI1LS4wMTZhMy4wNjIgMy4wNjIgMCAwIDEgMi4zNDUtLjMwNmMuNzcuMjEgMS40NjUuNzIxIDEuODk4IDEuNDgydi4wMDJjLjQzMS43NTcuNTE4IDEuNjI2LjMxMyAyLjQwOGEzLjE0NSAzLjE0NSAwIDAgMS0xLjQ1NiAxLjkyOGwtLjE5OC4xMThoLS4wMmEzLjA5NSAzLjA5NSAwIDAgMS0yLjE1NC4yMDEgMy4xMjcgMy4xMjcgMCAwIDEtMS41MTQtLjk0NGwtMS40NDQuODQ4YTQuMTYyIDQuMTYyIDAgMCAxIDAgMi44NzlsMS40NDQuODQ2Yy40MTMtLjQ3LjkzOS0uNzg5IDEuNTE0LS45NDRhMy4wNDEgMy4wNDEgMCAwIDEgMi4zNzEuMzE5bC4wNDguMDIzdi4wMDJhMy4xNyAzLjE3IDAgMCAxIDEuNDA4IDEuOTA2IDMuMjE1IDMuMjE1IDAgMCAxLS4zMTMgMi40MDVsLS4wMjYuMDUzLS4wMDMtLjAwNWEzLjE0NyAzLjE0NyAwIDAgMS0xLjg2NyAxLjQzNiAzLjA5NiAzLjA5NiAwIDAgMS0yLjM3MS0uMzE4di0uMDA2YTMuMTU2IDMuMTU2IDAgMCAxLTEuNDU2LTEuOTI3IDMuMTc1IDMuMTc1IDAgMCAxIC4wNDctMS44MDVsLTEuNDQ2LS44NDhhMy45MDUgMy45MDUgMCAwIDEtLjI2NS4yOTRsLS4wMDQuMDA1YTMuOTM4IDMuOTM4IDAgMCAxLTIuMTc4IDEuMTM4djEuNjk5YTMuMDkgMy4wOSAwIDAgMSAxLjU2Ljg2MmwuMDAyLjAwNGMuNTY1LjU3Mi45MTQgMS4zNjguOTE0IDIuMjQzIDAgLjg3My0uMzUgMS42NjQtLjkxNCAyLjIzOWwtLjAwMi4wMDlhMy4xIDMuMSAwIDAgMS0yLjIxLjkzMSAzLjEgMy4xIDAgMCAxLTIuMjA2LS45M2gtLjAwMnYtLjAwOWEzLjE4NiAzLjE4NiAwIDAgMS0uOTE2LTIuMjM5YzAtLjg3NS4zNS0xLjY3Mi45MTYtMi4yNDN2LS4wMDRoLjAwMmEzLjEgMy4xIDAgMCAxIDEuNTU4LS44NjJ2LTEuNjk5YTMuOTI2IDMuOTI2IDAgMCAxLTIuMTc2LTEuMTM4bC0uMDA2LS4wMDVhNC4wOTggNC4wOTggMCAwIDEtMS4xNzMtMi44NzRjMC0xLjEyMi40NTItMi4xMzYgMS4xNzMtMi44NzJoLjAwNmEzLjk0NyAzLjk0NyAwIDAgMSAyLjE3Ni0xLjE0NFY2LjI4OWEzLjEzNyAzLjEzNyAwIDAgMS0xLjU1OC0uODY0aC0uMDAydi0uMDA0YTMuMTkyIDMuMTkyIDAgMCAxLS45MTYtMi4yNDNjMC0uODcxLjM1LTEuNjY5LjkxNi0yLjI0M2wuMDAyLS4wMDJBMy4wODQgMy4wODQgMCAwIDEgOC42ODMgMGMuODYxIDAgMS42NDEuMzU1IDIuMjEuOTMydi4wMDJoLjAwMmMuNTY1LjU3NC45MTQgMS4zNzIuOTE0IDIuMjQzIDAgLjg3Ni0uMzUgMS42NjctLjkxNCAyLjI0M2wtLjAwMi4wMDVhMy4xNDIgMy4xNDIgMCAwIDEtMS41Ni44NjR2MS42OTJ6bTguMTIxLTEuMTI5bC0uMDEyLS4wMTlhMS40NTIgMS40NTIgMCAwIDAtLjg3LS42NjggMS40MyAxLjQzIDAgMCAwLTEuMTAzLjE0NmguMDAyYy0uMzQ3LjItLjU4LjUyOS0uNjc3Ljg5Ni0uMDk1LjM2NS0uMDU0Ljc2OC4xNDYgMS4xMTlsLjAwNy4wMDljLjIuMzQ3LjUxOS41NzkuODc0LjY3My4zNTcuMTAzLjc1NS4wNTkgMS4wOTgtLjE0NGwuMDE5LS4wMDlhMS40NyAxLjQ3IDAgMCAwIC42NTctLjg4NSAxLjQ5MyAxLjQ5MyAwIDAgMC0uMTQxLTEuMTE4Ii8+PC9zdmc+',
+    prom: 'data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRTY1MjJDIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+UHJvbWV0aGV1czwvdGl0bGU+PHBhdGggZD0iTTEyIDBDNS4zNzMgMCAwIDUuMzcyIDAgMTJjMCA2LjYyNyA1LjM3MyAxMiAxMiAxMnMxMi01LjM3MyAxMi0xMmMwLTYuNjI4LTUuMzczLTEyLTEyLTEyem0wIDIyLjQ2Yy0xLjg4NSAwLTMuNDE0LTEuMjYtMy40MTQtMi44MTRoNi44MjhjMCAxLjU1My0xLjUyOCAyLjgxMy0zLjQxNCAyLjgxM3ptNS42NC0zLjc0NUg2LjM2di0yLjA0NmgxMS4yOHYyLjA0NnptLS4wNC0zLjA5OEg2LjM5MWMtLjAzNy0uMDQzLS4wNzUtLjA4Ni0uMTExLS4xMy0xLjE1NS0xLjQwMS0xLjQyNy0yLjEzMy0xLjY5LTIuODc5LS4wMDUtLjAyNSAxLjQuMjg3IDIuMzk1LjUxMSAwIDAgLjUxMy4xMTkgMS4yNjIuMjU1LS43Mi0uODQzLTEuMTQ3LTEuOTE1LTEuMTQ3LTMuMDEgMC0yLjQwNiAxLjg0NS00LjUwOCAxLjE4LTYuMjA3LjY0OC4wNTMgMS4zNCAxLjM2NyAxLjM4NyAzLjQyMi42ODktLjk1MS45NzctMi42OS45NzctMy43NTUgMC0xLjEwMy43MjctMi4zODUgMS40NTQtMi40MjktLjY0OCAxLjA2OS4xNjggMS45ODQuODk0IDQuMjU2LjI3Mi44NTQuMjM3IDIuMjkuNDQ3IDMuMjAxLjA3LTEuODkyLjM5NS00LjY1MiAxLjU5NS01LjYwNS0uNTI5IDEuMi4wNzkgMi43MDIuNDk0IDMuNDI0LjY3MSAxLjE2NCAxLjA3OCAyLjA0NyAxLjA3OCAzLjcxNmE0LjY0MiA0LjY0MiAwIDAxLTEuMTEgMi45OTZjLjc5Mi0uMTQ5IDEuMzQtLjI4MyAxLjM0LS4yODNsMi41NzMtLjUwMnMtLjM3NCAxLjUzOC0xLjgxIDMuMDE5eiIvPjwvc3ZnPg==',
+  };
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const root = document.getElementById('cfk-arch');
+  const svg = root.querySelector('#diagram');
+  const tip = root.querySelector('.tip');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const el = (tag, attrs = {}, parent) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (parent) parent.appendChild(e);
+    return e;
+  };
+  const txt = (parent, x, y, str, cls, anchor = 'start') => {
+    const t = el('text', { x, y, class: cls, 'text-anchor': anchor }, parent);
+    t.textContent = str;
+    return t;
+  };
+  const tagged = (g, tags) => { if (tags) g.setAttribute('data-tags', tags.join(' ')); return g; };
+
+  const L = {
+    groups: el('g', {}, svg), bands: el('g', {}, svg), lanes: el('g', {}, svg),
+    dots: el('g', { class: 'dots' }, svg), nodes: el('g', {}, svg), overlay: el('g', {}, svg),
+  };
+
+  const ROW = { a: 360, b: 510, c: 660 };
+  const SR_Y = 812, GOV_Y = 836;
+
+  // ---------- AWS groups ----------
+  const groups = [
+    { x: 20, y: 120, w: 190, h: 915, label: 'Internet', icon: I.internet, color: '--faint', dash: '4 5', tile: true },
+    { x: 230, y: 100, w: 1515, h: 950, label: 'AWS Cloud', icon: I.cloud, color: '--cloud' },
+    { x: 245, y: 140, w: 1485, h: 895, label: 'Region us-east-1 · 3 Availability Zones', icon: I.region, color: '--region', dash: '6 4' },
+    { x: 265, y: 180, w: 500, h: 718, label: 'DMZ VPC · 10.1.0.0/16', icon: I.vpc, color: '--vpc' },
+    { x: 280, y: 220, w: 150, h: 662, label: 'Public subnets', icon: I.pub, color: '--pub' },
+    { x: 445, y: 220, w: 305, h: 662, label: 'Private subnets', icon: I.priv, color: '--priv' },
+    { x: 458, y: 256, w: 280, h: 612, label: 'Amazon EKS · cfk-dmz', icon: I.eks, color: '--eks' },
+    { x: 890, y: 180, w: 825, h: 718, label: 'Core VPC · 10.0.0.0/16', icon: I.vpc, color: '--vpc' },
+    { x: 905, y: 220, w: 795, h: 662, label: 'Private subnets', icon: I.priv, color: '--priv' },
+    { x: 1030, y: 256, w: 660, h: 524, label: 'Amazon EKS · cfk-eks', icon: I.eks, color: '--eks' },
+  ];
+  groups.forEach((g, i) => {
+    const grp = el('g', { class: 'fade', style: `animation-delay:${i * 60}ms` }, L.groups);
+    el('rect', {
+      x: g.x, y: g.y, width: g.w, height: g.h, rx: 4,
+      style: `stroke:var(${g.color});fill:var(${g.color})`, 'fill-opacity': .035, 'stroke-width': 1.3,
+      ...(g.dash ? { 'stroke-dasharray': g.dash } : {}),
+    }, grp);
+    if (g.tile) el('rect', { x: g.x + 1, y: g.y + 1, width: 26, height: 26, rx: 3, class: 'tile' }, grp);
+    el('image', { href: g.icon, x: g.x + (g.tile ? 4 : 0), y: g.y + (g.tile ? 4 : 0), width: g.tile ? 20 : 28, height: g.tile ? 20 : 28 }, grp);
+    txt(grp, g.x + 36, g.y + 19, g.label, 't-group');
+  });
+
+  // Availability-zone bands
+  const zones = ['us-east-1a', 'us-east-1b', 'us-east-1c'];
+  [[470, 258], [1040, 362]].forEach(([x, w]) => {
+    Object.values(ROW).forEach((y, i) => {
+      const g = el('g', { class: 'fade', style: `animation-delay:${500 + i * 60}ms` }, L.bands);
+      el('rect', { x, y: y - 68, width: w, height: 136, rx: 8, fill: 'none', style: 'stroke:var(--az)', 'stroke-dasharray': '3 4' }, g);
+      txt(g, x + 8, y - 55, zones[i], 't-az');
+    });
+  });
+  txt(L.bands, 972, 314, 'INTERNAL NLBS', 't-col', 'middle');
+  txt(L.bands, 1460, 296, 'SHARED', 't-col', 'middle');
+  txt(L.bands, 1612, 296, 'IN-CLUSTER APPS', 't-col', 'middle');
+  txt(L.bands, 690, 932, 'REGIONAL AWS SERVICES', 't-col', 'middle');
+
+  // ---------- Nodes ----------
+  const nodes = [
+    { id: 'dns', x: 115, y: 320, w: 160, icon: I.r53, full: true, title: 'Amazon Route 53', sub: ['Public zone dspdemos.com'], tags: ['kafka', 'sr', 'apps'],
+      tip: 'kafka.gateway.wf.dspdemos.com and *.kafka.gateway.wf.dspdemos.com point at the DMZ NLB; sr.wf.dspdemos.com points at the DMZ ALB. Internal names never resolve from the internet.' },
+    { id: 'kc', x: 115, y: ROW.b, w: 160, icon: I.users, title: 'External app', sub: ['Java producer + consumer', 'Avro serdes · SR lookups', 'alice certificate (mTLS)'], tags: ['kafka', 'apps', 'sr', 'enc'],
+      tip: 'The Java demo producer and consumer on the laptop, or any partner app. Kafka: connects to kafka.gateway.wf.dspdemos.com:9092 with a client certificate signed by the trusted CA; SNI routes each connection to the right broker (b<id>.kafka.gateway.wf.dspdemos.com). Schemas: the producer\'s Avro serializer and the consumer\'s deserializer look schemas up at https://sr.wf.dspdemos.com with alice\'s LDAP username and password (public ACM certificate, no custom truststore). Uses the same demo-orders and demo-payments topics as the in-cluster app. Sends and receives plaintext: no encryption code, no KMS access and no keys.' },
+
+    { id: 'nlbpub', x: 355, y: ROW.b, w: 130, icon: I.nlb, title: 'Network LB', sub: ['Internet-facing', 'TCP passthrough', 'IP allowlist'], tags: ['kafka', 'security', 'apps'],
+      tip: 'Internet-facing NLB in the DMZ public subnets across 3 AZs. TCP passthrough, so TLS is ended by the Gateway, not the load balancer. Only allowlisted source IPs can connect.' },
+    { id: 'natdmz', x: 355, y: ROW.c, w: 130, icon: I.nat, title: 'NAT gateway', sub: ['Outbound only'],
+      tip: 'Outbound internet access for the DMZ nodes (image pulls). Nothing inbound.' },
+    { id: 'albpub', x: 355, y: SR_Y + 8, w: 130, icon: I.alb, title: 'Application LB', sub: ['HTTPS 443', 'IP allowlist'], tags: ['sr', 'security'],
+      tip: 'Public ALB for Schema Registry, separate from the Gateway. Ends TLS with the ACM certificate for sr.wf.dspdemos.com, passes the Authorization header through, and re-encrypts to the read-only Schema Registry in the DMZ cluster. Edge rules refuse writes (schema registration, PUT, DELETE) with 403; reads and schema lookups pass. Health checks accept 401.' },
+    { id: 'srdmz', x: 600, y: SR_Y, w: 204, h: 66, layout: 'h', icon: I.confluent, title: 'Schema Registry', sub: ['Read-only · 2 replicas', 'Schema linking target'], tags: ['sr', 'security'],
+      tip: 'Read-only Schema Registry for external clients, in the DMZ cluster. Holds every subject linked from the core registry with the same names and schema IDs, so records produced through the Gateway deserialize unchanged. IMPORT mode: only the schema link writes to it. Clients log in with their LDAP user (checked by MDS) and only get read roles. No DEK registry: encryption keys stay in the core. The core registry itself is never exposed to the internet.' },
+
+    ...['a', 'b', 'c'].map((r, i) => ({
+      id: `gw${i}`, x: 600, y: ROW[r], w: 204, h: 92, layout: 'h', icon: I.confluent, title: 'CPC Gateway', sub: ['Ends client TLS', 'mTLS upstream', 'Rules · PII encryption'],
+      tags: ['kafka', 'gov', 'apps', 'enc'],
+      tip: `Gateway replica ${i} of 3. Presents the server certificate for *.kafka.gateway.wf.dspdemos.com, authenticates partners by client certificate, then connects to the brokers as User:cpcgw-dmz-client. Brokers only ever see the Gateway identity. Runs the data-contract rules of each schema (enableAt GATEWAY): CEL data-quality checks, and field encryption of PII-tagged fields on produce and decryption on fetch.`,
+    })),
+
+    { id: 'nacl', x: 827, y: 290, w: 108, icon: I.nacl, title: 'SG + NACL', sub: ['Kafka · SR · MDS'], tags: ['security'],
+      tip: 'Security groups and network ACLs only allow DMZ to core traffic on the Kafka listener ports, the Schema Registry port (Gateway governance) and MDS (login checks for the read-only Schema Registry). Return traffic only; the core cannot open connections into the DMZ.' },
+    { id: 'peer', x: 827, y: 590, w: 108, icon: I.peer, title: 'VPC peering', sub: ['Private route', 'tables only'], tags: ['kafka', 'sr', 'gov', 'security', 'apps', 'enc'],
+      tip: 'Peering routes exist only between the private subnet route tables (plus the ALB subnets to the SR load balancer). Public subnets are never routed across.' },
+    { id: 'kms', x: 690, y: 985, w: 120, tileText: 'KMS', title: 'AWS KMS', sub: ['payments KEK'], tags: ['enc', 'security'],
+      tip: 'Regional AWS KMS key alias/wf-demo-payments-kek (rotation on), reached over HTTPS through the DMZ NAT. Only the Gateway can use it: its pods run as the IRSA role cfk-dmz-cpcgw-irsa, which may only assume cfk-dmz-cpcgw-kms, which may only Encrypt, Decrypt, GenerateDataKey and DescribeKey on this one key. The key never leaves KMS; it wraps the data keys (DEKs).' },
+
+    { id: 'b0', x: 972, y: ROW.a, w: 104, layout: 'c', icon: I.nlb, title: 'b0.internal', tags: ['kafka', 'apps'], tip: 'Internal NLB for broker 0 only. 3 AZs, cross-zone, IP targets. b0.internal.dspdemos.com in the private zone.' },
+    { id: 'boot', x: 972, y: 431, w: 104, layout: 'c', icon: I.nlb, title: 'kafka.internal', sub: ['bootstrap'], tags: ['kafka', 'apps'], tip: 'Bootstrap NLB in front of all brokers, used for the first connection and metadata only.' },
+    { id: 'b1', x: 972, y: ROW.b, w: 104, layout: 'c', icon: I.nlb, title: 'b1.internal', tags: ['kafka', 'apps'], tip: 'Internal NLB for broker 1 only. CFK creates one per broker automatically.' },
+    { id: 'b2', x: 972, y: ROW.c, w: 104, layout: 'c', icon: I.nlb, title: 'b2.internal', tags: ['kafka', 'apps'], tip: 'Internal NLB for broker 2 only. Source ranges are limited to the core VPC and the DMZ private subnets.' },
+    { id: 'srnlb', x: 972, y: SR_Y, w: 104, layout: 'c', icon: I.nlb, title: 'sr.internal', sub: ['Schema Registry'], tags: ['gov', 'enc'], tip: 'Internal NLB for the core Schema Registry, cross-zone across 3 AZs. Private only: reachable from the core VPC and the DMZ Gateway nodes (rules, encryption keys). Not reachable from the internet.' },
+
+    ...['a', 'b', 'c'].flatMap((r, i) => [
+      { id: `k${i}`, x: 1098, y: ROW[r], w: 100, icon: I.kafka, title: 'Kafka broker', sub: [`b${i} · gp3 volume`], tags: ['kafka', 'apps'],
+        tip: `Broker ${i}, rack-aware in ${zones[i]}. Replication factor 3, min.insync.replicas 2. mTLS listeners with Confluent RBAC (MDS backed by LDAP).` },
+      { id: `kr${i}`, x: 1215, y: ROW[r], w: 104, icon: I.kafka, title: 'KRaft', sub: [`controller-${i}`], tags: ['kafka'],
+        tip: 'KRaft controller quorum, one per AZ. No ZooKeeper.' },
+    ]),
+    ...['a', 'b'].map((r, i) => ({
+      id: `sr${i}`, x: 1337, y: ROW[r], w: 110, icon: I.confluent, title: 'Schema Registry', sub: [`sr-${i}`, 'Rules + DEK registry'], tags: ['sr', 'gov', 'enc'],
+      tip: 'Core Schema Registry, the source of truth: 2 replicas across AZs, private only. Clients authenticate with LDAP basic auth (checked by MDS); RBAC decides which subjects each user can read or register. Holds the data contracts (schemas with CEL and ENCRYPT rule sets) and, in the DEK registry, the KEK definition and the KMS-wrapped data keys. Schema linking copies every subject to the read-only registry for external clients. Enterprise license with the CSFLE add-on.',
+    })),
+    { id: 'c3', x: 1460, y: ROW.a, w: 104, icon: I.confluent, title: 'Control Center', sub: ['LDAP login'], tags: ['security'],
+      tip: 'Control Center next-gen for monitoring, with LDAP login via MDS. Private only (port-forward); not reachable from the DMZ.' },
+    { id: 'prom', x: 1460, y: ROW.b, w: 104, icon: I.prom, title: 'Prometheus', sub: ['+ Alertmanager'],
+      tip: 'Metrics and alerting for Control Center next-gen.' },
+    { id: 'ldap', x: 1460, y: ROW.c, w: 104, tileText: 'LDAP', title: 'OpenLDAP', sub: ['Users + groups'], tags: ['sr', 'security'],
+      tip: 'Identity source for MDS: users and groups for Confluent RBAC, Schema Registry basic auth and Control Center login. Not reachable from the DMZ.' },
+
+    { id: 'ip', x: 1612, y: 435, w: 136, icon: I.app, title: 'Internal producer', sub: ['kafka-client pod', 'User:alice · port 9071'], tags: ['apps'],
+      tip: 'Runs in the core cluster (namespace confluent) and connects straight to the in-cluster listener kafka.confluent.svc.cluster.local:9071 with alice\'s certificate: no Gateway and no load balancer. Avro records use the private Schema Registry.' },
+    { id: 'ic', x: 1612, y: 585, w: 136, icon: I.app, title: 'Internal consumer', sub: ['kafka-client pod', 'group demo-…'], tags: ['apps'],
+      tip: 'Reads the same demo-orders and demo-payments topics in-cluster as User:alice, so records produced by the external app through the Gateway show up here, and vice versa.' },
+    { id: 'topics', x: 1612, y: 706, w: 136, icon: I.kafka, title: 'Shared topics', sub: ['demo-orders · plain text', 'demo-payments · Avro', 'PII fields encrypted'], tags: ['apps', 'gov', 'enc'],
+      tip: 'Both topics live on the brokers with 6 partitions, replication factor 3 and min.insync.replicas 2. Gateway schema validation applies to demo-payments; demo-orders carries plain-text test records. On demo-payments the brokers store customer_name and card_number only as ciphertext: a consumer that bypasses the Gateway sees encrypted values, and amount, currency and merchant stay readable.' },
+  ];
+
+  const nodeEls = {};
+  nodes.forEach((n, idx) => {
+    const layout = n.layout || 'v';
+    const sub = n.sub || [];
+    const h = n.h || (layout === 'c' ? (sub.length ? 74 : 62) : 70 + sub.length * 14);
+    const outer = el('g', { transform: `translate(${n.x - n.w / 2},${n.y - h / 2})` }, L.nodes);
+    const g = tagged(el('g', { class: 'node fade', tabindex: 0, style: `animation-delay:${700 + idx * 35}ms` }, outer), n.tags);
+    el('rect', { x: 0, y: 0, width: n.w, height: h, rx: 10, class: 'card' }, g);
+
+    const tile = layout === 'h' ? { x: 12, y: (h - 46) / 2, s: 46 } : layout === 'c' ? { x: n.w / 2 - 17, y: 8, s: 34 } : { x: n.w / 2 - 21, y: 10, s: 42 };
+    if (n.full) {
+      el('image', { href: n.icon, x: tile.x, y: tile.y, width: tile.s, height: tile.s }, g);
+    } else {
+      el('rect', { x: tile.x, y: tile.y, width: tile.s, height: tile.s, rx: 8, class: 'tile' }, g);
+      if (n.tileText) txt(g, tile.x + tile.s / 2, tile.y + tile.s / 2 + 4, n.tileText, 't-tile', 'middle');
+      else { const p = tile.s * .14; el('image', { href: n.icon, x: tile.x + p, y: tile.y + p, width: tile.s - 2 * p, height: tile.s - 2 * p }, g); }
+    }
+    if (layout === 'h') {
+      txt(g, 70, h / 2 - 9, n.title, 't-title');
+      sub.forEach((s, i) => txt(g, 70, h / 2 + 7 + i * 14, s, 't-sub'));
+    } else {
+      const ty = layout === 'c' ? 55 : 68;
+      txt(g, n.w / 2, ty, n.title, 't-title', 'middle');
+      sub.forEach((s, i) => txt(g, n.w / 2, ty + 14 + i * 13, s, 't-sub', 'middle'));
+    }
+    g.addEventListener('mouseenter', e => showTip(n, e));
+    g.addEventListener('mousemove', e => moveTip(e));
+    g.addEventListener('mouseleave', hideTip);
+    g.addEventListener('focus', () => showTip(n, null, g));
+    g.addEventListener('blur', hideTip);
+    nodeEls[n.id] = g;
+  });
+
+  // Small badges: ACM + WAF on the ALB, core private zone + NAT in the VPC header
+  const mini = (x, y, icon, label, tags) => {
+    const g = tagged(el('g', { class: 'fade', style: 'animation-delay:1300ms' }, L.nodes), tags);
+    el('image', { href: icon, x, y: y - 11, width: 22, height: 22 }, g);
+    txt(g, x + 28, y + 4, label, 't-mini');
+    return g;
+  };
+  mini(290, 728, I.acm, 'ACM', ['sr']);
+  mini(356, 728, I.waf, 'WAF', ['sr', 'security']);
+  const zoneTile = el('g', { class: 'fade', style: 'animation-delay:1300ms' }, L.nodes);
+  el('rect', { x: 1162, y: 186, width: 22, height: 22, rx: 4, class: 'tile' }, zoneTile);
+  el('image', { href: I.zone, x: 1164, y: 188, width: 18, height: 18 }, zoneTile);
+  txt(zoneTile, 1190, 201, 'Private zone internal.dspdemos.com', 't-mini');
+  const natTile = el('g', { class: 'fade', style: 'animation-delay:1300ms' }, L.nodes);
+  el('rect', { x: 1572, y: 186, width: 22, height: 22, rx: 4, class: 'tile' }, natTile);
+  el('image', { href: I.nat, x: 1574, y: 188, width: 18, height: 18 }, natTile);
+  txt(natTile, 1600, 201, 'NAT (public subnet)', 't-mini');
+
+  // Platform chips inside each EKS cluster
+  const chips = (x, y, labels) => {
+    let cx = x;
+    labels.forEach(l => {
+      const w = l.length * 5.6 + 18;
+      const g = el('g', { class: 'chip fade', style: 'animation-delay:1400ms' }, L.nodes);
+      el('rect', { x: cx, y, width: w, height: 22, rx: 11 }, g);
+      txt(g, cx + w / 2, y + 14.5, l, '', 'middle');
+      cx += w + 6;
+    });
+  };
+  chips(468, 746, ['CFK operator', 'LB Controller', 'ExternalDNS']);
+  chips(1040, 746, ['MDS · RBAC', 'cert-manager CA']);
+  chips(1410, 746, ['CFK 3.4']);
+
+  // ---------- Traffic lanes ----------
+  const lanes = [
+    { cls: 'kafka', tags: ['kafka', 'apps'], d: `M115,${ROW.b} L355,${ROW.b} C470,${ROW.b} 470,${ROW.a} 600,${ROW.a} L1098,${ROW.a}`, both: true },
+    { cls: 'kafka', tags: ['kafka', 'apps'], d: `M115,${ROW.b} L1098,${ROW.b}`, both: true },
+    { cls: 'kafka', tags: ['kafka', 'apps'], d: `M115,${ROW.b} L355,${ROW.b} C470,${ROW.b} 470,${ROW.c} 600,${ROW.c} L1098,${ROW.c}`, both: true },
+    { cls: 'app', tags: ['apps'], d: `M1612,435 L1160,435 C1118,435 1098,470 1098,${ROW.b}` },
+    { cls: 'app', tags: ['apps'], d: `M1098,${ROW.c} C1098,620 1118,585 1160,585 L1612,585` },
+    { cls: 'sr', tags: ['sr'], d: `M115,${ROW.b} L115,${SR_Y - 20} Q115,${SR_Y} 135,${SR_Y} L600,${SR_Y}` },
+    { cls: 'gov', tags: ['gov', 'enc'], d: `M600,${ROW.c} C760,${ROW.c} 760,${GOV_Y} 827,${GOV_Y} C900,${GOV_Y} 905,${SR_Y} 972,${SR_Y} L1337,${SR_Y} L1337,${ROW.b}` },
+    { cls: 'kms', tags: ['enc'], d: 'M690,700 L760,700 Q780,700 780,720 L780,965 Q780,985 760,985 L750,985' },
+    { cls: 'link', tags: ['sr'], d: `M1362,559 L1362,862 Q1362,876 1348,876 L614,876 Q600,876 600,862 L600,${SR_Y}` },
+  ];
+  el('path', { d: 'M827,232 L827,880', class: 'firewall', 'data-tags': 'security' }, L.lanes);
+
+  lanes.forEach((ln, i) => {
+    const p = tagged(el('path', { d: ln.d, class: `lane ${ln.cls}` }, L.lanes), ln.tags);
+    const len = p.getTotalLength();
+    if (!reduced) {
+      p.style.strokeDasharray = `${len}`;
+      p.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: 1500, delay: 900 + i * 150, easing: 'ease-out', fill: 'both' })
+        .onfinish = () => { p.style.strokeDasharray = ''; };
+    }
+    const id = `lane-${i}`;
+    p.id = id;
+    const dg = tagged(el('g', {}, L.dots), ln.tags);
+    const dur = len / 150;
+    const count = Math.max(2, Math.round(len / 240));
+    const addDot = (k, reverse) => {
+      const g = el('g', {}, dg);
+      el('circle', { r: reverse ? 7 : 9, class: `dot halo ${ln.cls}` }, g);
+      el('circle', { r: reverse ? 3 : 4.5, class: `dot ${ln.cls}`, ...(reverse ? { opacity: .75 } : {}) }, g);
+      const am = el('animateMotion', {
+        dur: `${dur}s`, repeatCount: 'indefinite', begin: `${2.4 + (k / count) * dur + i * .3}s`,
+        ...(reverse ? { keyPoints: '1;0', keyTimes: '0;1', calcMode: 'linear' } : {}),
+      }, g);
+      el('mpath', { href: `#${id}` }, am);
+      g.setAttribute('opacity', 0);
+      el('set', { attributeName: 'opacity', to: 1, begin: am.getAttribute('begin') }, g);
+    };
+    for (let k = 0; k < count; k++) addDot(k, false);
+    if (ln.both) for (let k = 0; k < count - 1; k++) addDot(k + .5, true);
+  });
+
+  // Lane labels
+  const lab = (x, y, lines, tags, anchor = 'middle') => {
+    const g = tagged(el('g', { class: 'fade', style: 'animation-delay:1800ms' }, L.lanes), tags);
+    lines.forEach((l, i) => txt(g, x, y + i * 13, l, 't-lane', anchor));
+  };
+  lab(243, ROW.b + 20, ['mTLS + SNI'], ['kafka', 'apps']);
+  lab(243, SR_Y - 30, ['HTTPS 443', 'basic auth'], ['sr']);
+  lab(827, ROW.b + 18, ['as cpcgw-dmz-client'], ['kafka', 'apps']);
+  lab(827, GOV_Y + 18, ['Schemas, rules, DEKs'], ['gov', 'enc']);
+  lab(790, 945, ['HTTPS · IRSA'], ['enc'], 'start');
+  lab(1190, 869, ['Schema linking · all subjects, same IDs · one-way'], ['sr']);
+  lab(1232, 579, ['consume · same topics'], ['apps']);
+
+  // Kafka bootstrap endpoints
+  const endpoint = ({ x, y, tag, text, color, tags, leader, title }) => {
+    const g = tagged(el('g', { class: 'endpoint fade', style: 'animation-delay:1900ms' }, L.overlay), tags);
+    el('title', {}, g).textContent = title;
+    if (leader) el('path', { d: leader, fill: 'none', style: `stroke:var(${color})`, 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }, g);
+    const pulse = el('rect', { class: 'ep-pulse', style: `stroke:var(${color})` }, g);
+    const box = el('rect', { class: 'ep-box', style: `stroke:var(${color})` }, g);
+    const t1 = txt(g, 0, 0, tag, 't-ep-tag');
+    t1.style.fill = `var(${color})`;
+    const t2 = txt(g, 0, 0, text, 't-ep');
+    const w = Math.max(t1.getComputedTextLength(), t2.getComputedTextLength()) + 16, h = 38;
+    const x0 = x - w / 2, y0 = y - h / 2;
+    for (const r of [pulse, box]) Object.entries({ x: x0, y: y0, width: w, height: h, rx: 8 }).forEach(([k, v]) => r.setAttribute(k, v));
+    [[t1, 14], [t2, 29]].forEach(([t, dy]) => { t.setAttribute('x', x0 + 8); t.setAttribute('y', y0 + dy); });
+  };
+  endpoint({ x: 200, y: 428, tag: 'PUBLIC ENDPOINT · INTERNET', text: 'kafka.gateway.wf.dspdemos.com:9092', color: '--kafka',
+    tags: ['kafka', 'apps'], leader: `M243,447 L243,${ROW.b}`,
+    title: 'Public bootstrap for external clients. Resolves to the internet-facing NLB; brokers are reached as b0/b1/b2.kafka.gateway.wf.dspdemos.com via SNI.' });
+  endpoint({ x: 811, y: 487, tag: 'PRIVATE ENDPOINT · VPC', text: 'kafka.internal.dspdemos.com:9092', color: '--kafka',
+    tags: ['kafka', 'apps'], leader: `M811,506 L811,${ROW.b}`,
+    title: 'Private bootstrap the Gateway uses upstream. Internal NLB in the core VPC; advertises b0/b1/b2.internal.dspdemos.com:9092. Not resolvable from the internet.' });
+  endpoint({ x: 115, y: 690, tag: 'SCHEMA REGISTRY · INTERNET', text: 'sr.wf.dspdemos.com', color: '--sr',
+    tags: ['sr'], title: 'Public Schema Registry endpoint for the external app\'s Avro serdes. Resolves to the DMZ ALB, which forwards to the read-only Schema Registry in the DMZ.' });
+  endpoint({ x: 1352, y: 435, tag: 'IN-CLUSTER ENDPOINT · CORE APPS', text: 'kafka.confluent.svc.cluster.local:9071', color: '--app',
+    tags: ['apps'], title: 'In-cluster listener for apps running in cfk-eks. Kubernetes service, no load balancer, mTLS as the app\'s own identity (User:alice).' });
+
+  // Blocked paths (security view)
+  const bl = el('g', { class: 'blocked' }, L.overlay);
+  el('path', { d: 'M716,412 L812,412', fill: 'none', style: 'stroke:var(--deny)', 'stroke-width': 2, 'stroke-dasharray': '4 4' }, bl);
+  el('circle', { cx: 827, cy: 412, r: 11, style: 'fill:var(--bg);stroke:var(--deny)', 'stroke-width': 2 }, bl);
+  el('path', { d: 'M822,407 L832,417 M832,407 L822,417', style: 'stroke:var(--deny)', 'stroke-width': 2.2, 'stroke-linecap': 'round' }, bl);
+  txt(bl, 827, 438, 'Blocked from DMZ:', 't-deny', 'middle');
+  txt(bl, 827, 451, 'K8s API · LDAP · C3', 't-deny', 'middle');
+
+  // ---------- Tooltip ----------
+  function showTip(n, e, target) {
+    tip.innerHTML = '';
+    const s = document.createElement('strong'); s.textContent = n.title;
+    const sp = document.createElement('span'); sp.textContent = n.tip || '';
+    tip.append(s, sp);
+    tip.hidden = false;
+    if (e) moveTip(e);
+    else {
+      const r = target.getBoundingClientRect(), st = root.querySelector('.stage').getBoundingClientRect();
+      place(r.right - st.left + 8, r.top - st.top);
+    }
+  }
+  function moveTip(e) {
+    const st = root.querySelector('.stage').getBoundingClientRect();
+    place(e.clientX - st.left + 16, e.clientY - st.top + 16);
+  }
+  function place(x, y) {
+    const st = root.querySelector('.stage').getBoundingClientRect();
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = `${Math.min(x, st.width - w - 8)}px`;
+    tip.style.top = `${Math.min(y, st.height - h - 8)}px`;
+  }
+  function hideTip() { tip.hidden = true; }
+
+  // ---------- Modes ----------
+  const MODES = {
+    all: {
+      color: 'var(--card-hover)',
+      title: 'Partners reach Kafka and Schema Registry only through the DMZ',
+      steps: [
+        '<b>Two VPCs, two EKS clusters.</b> The core platform runs privately in <code>cfk-eks</code>; the internet only touches the DMZ cluster <code>cfk-dmz</code>.',
+        '<b>Multi-AZ everywhere.</b> Load balancers, Gateways, brokers, KRaft and Schema Registry span 3 Availability Zones.',
+        '<b>Zero trust at every hop.</b> mTLS from partner to Gateway and from Gateway to brokers, with Confluent RBAC backed by LDAP.',
+        '<b>Modelled on the existing MQ ingress pattern:</b> SNI at the edge, DMZ proxy tier, firewall, internal load balancers.',
+      ],
+    },
+    kafka: {
+      color: 'var(--kafka)',
+      title: 'Kafka produce and consume through the CPC Gateway',
+      steps: [
+        'Partner connects to <code>kafka.gateway.wf.dspdemos.com:9092</code> with its <b>client certificate</b>; SNI picks the broker.',
+        'The <b>internet-facing NLB</b> passes TCP straight through to the Gateway, for allowlisted source IPs only.',
+        'The <b>CPC Gateway</b> ends the partner TLS session and opens a new mTLS session as <code>User:cpcgw-dmz-client</code>.',
+        'Across <b>VPC peering</b> to the internal NLBs (bootstrap + one per broker) and on to <b>rack-aware brokers</b> with RBAC.',
+      ],
+    },
+    apps: {
+      color: 'var(--app)',
+      title: 'One topic, two worlds: internal and external apps share demo-orders and demo-payments',
+      steps: [
+        'The <b>external Java app</b> produces and consumes through <code>kafka.gateway.wf.dspdemos.com:9092</code> with alice\'s certificate; the brokers see <code>User:cpcgw-dmz-client</code>.',
+        'The <b>internal kafka-client pod</b> uses the in-cluster listener <code>kafka.confluent.svc.cluster.local:9071</code> directly as <code>User:alice</code>; no Gateway, no load balancer.',
+        '<b>Same topics, both directions:</b> a record produced outside is consumed inside, and a record produced inside is consumed outside.',
+        '<b>demo-payments</b> is Avro: the Gateway validates external writes against the registered schema; <b>demo-orders</b> carries plain text.',
+      ],
+    },
+    sr: {
+      color: 'var(--sr)',
+      title: 'A read-only Schema Registry in the DMZ for external clients',
+      steps: [
+        'The external app\'s <b>Avro serializer (producer) and deserializer (consumer)</b> call <code>https://sr.wf.dspdemos.com</code> with their <b>LDAP username and password</b>.',
+        'The <b>public ALB</b> ends TLS with an <b>ACM certificate</b>, with source IP allowlist and optional <b>AWS WAF</b>, and <b>refuses every write</b> at the edge.',
+        'It forwards to the <b>read-only Schema Registry in the DMZ</b>: logins are checked by MDS against LDAP, and users only get <b>read roles</b>.',
+        '<b>Schema linking</b> copies every subject from the core registry with the <b>same schema IDs</b>; the core registry is never exposed to the internet.',
+      ],
+    },
+    gov: {
+      color: 'var(--gov)',
+      title: 'Data governance at the edge',
+      steps: [
+        'The Gateway looks up schemas and their rule sets at <code>https://sr.internal.dspdemos.com</code> as <code>cpcgw-dmz-sr-client</code>.',
+        'That LDAP service user is <b>read-only</b> on the governed subjects.',
+        'Records that <b>don\'t match the registered schema are rejected</b> by the Gateway before they reach the brokers.',
+        '<b>CEL data-quality rules</b> (<code>amount-positive</code>, <code>currency-allowed</code>, <code>card-number-16-digits</code>) run at the Gateway (<code>enableAt: GATEWAY</code>); the producer gets <code>InvalidRecordException</code>.',
+      ],
+    },
+    enc: {
+      color: 'var(--kms)',
+      title: 'Field-level encryption of PII at the Gateway, keys in AWS KMS',
+      steps: [
+        'The <b>data contract</b> tags <code>customer_name</code> and <code>card_number</code> as <code>PII</code>, with an <b>ENCRYPT rule</b> that runs at the Gateway.',
+        'On produce, the <b>Gateway encrypts</b> the tagged fields with a data key (DEK); the brokers only ever store <b>ciphertext</b>.',
+        'The DEK is wrapped by the regional <b>KMS key</b> <code>payments-kek</code> and kept in the core SR <b>DEK registry</b>; only the Gateway\'s IAM role (IRSA) can use the key.',
+        'On fetch, the <b>Gateway decrypts</b> for authorized consumers. Clients need <b>no keys, no KMS access and no code changes</b>.',
+      ],
+    },
+    security: {
+      color: 'var(--deny)',
+      title: 'What the DMZ can and cannot reach',
+      steps: [
+        '<b>Peering routes</b> only between private route tables; public subnets are never routed across.',
+        '<b>Security groups and network ACLs</b> allow only the Kafka listener ports, the SR port (Gateway) and MDS (read-only SR logins) from the DMZ.',
+        'The core <b>Kubernetes API, LDAP and Control Center</b> are not reachable from the DMZ, and the core cannot open connections into it.',
+        'External clients only reach the <b>read-only Schema Registry</b>; the core registry is reachable only by the Gateway.',
+        'Metadata returned to partners shows only <code>*.kafka.gateway.wf.dspdemos.com</code>, never internal names or IPs.',
+        'The <b>KMS key</b> is usable only by the Gateway\'s IRSA role; brokers, operators and clients cannot decrypt PII.',
+      ],
+    },
+  };
+  const tagEls = [...svg.querySelectorAll('[data-tags]')];
+  const buttons = [...root.querySelectorAll('.seg button')];
+  function setMode(mode) {
+    root.dataset.mode = mode;
+    buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    tagEls.forEach(e => e.classList.toggle('dim', mode !== 'all' && !e.dataset.tags.split(' ').includes(mode)));
+    const m = MODES[mode];
+    root.querySelector('#cap-title').textContent = m.title;
+    root.querySelector('.caption .swatch').style.background = m.color;
+    root.querySelector('#cap-steps').innerHTML = m.steps.map(s => `<li>${s}</li>`).join('');
+  }
+  buttons.forEach(b => b.addEventListener('click', () => { stopPlay(); setMode(b.dataset.mode); }));
+  setMode('all');
+
+  const order = ['kafka', 'apps', 'sr', 'gov', 'enc', 'security', 'all'];
+  let timer = null;
+  const playBtn = root.querySelector('#play');
+  function stopPlay() { clearInterval(timer); timer = null; playBtn.textContent = 'Play walkthrough'; }
+  playBtn.addEventListener('click', () => {
+    if (timer) return stopPlay();
+    let i = 0;
+    setMode(order[i]);
+    playBtn.textContent = 'Pause';
+    timer = setInterval(() => { i = (i + 1) % order.length; setMode(order[i]); }, 7000);
+  });
+
+  const themeBtn = root.querySelector('#theme');
+  themeBtn.addEventListener('click', () => {
+    const light = root.dataset.theme === 'dark';
+    root.dataset.theme = light ? 'light' : 'dark';
+    themeBtn.textContent = light ? 'Dark theme' : 'Light theme';
+  });
+  root.querySelector('#fs').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen(); else root.requestFullscreen();
+  });
+})();
+</script>
+</body>
+</html>

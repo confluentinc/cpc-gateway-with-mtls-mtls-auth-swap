@@ -1,0 +1,56 @@
+# A client pod in the core cluster that runs the Java producer/consumer against the internal NLB
+# (kafka.${PRIVATE_ZONE}:9092) and the internal Schema Registry, with the user's own certificate.
+# The jar is copied in by deploy.sh; the stores and configs come from the internal-client secret.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: clients
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: internal-client-bin
+  namespace: clients
+data:
+  # Output also goes to the main process's stdout, so it shows up in "kubectl logs".
+  producer: |
+    #!/bin/sh
+    java $JAVA_OPTS -cp /app/gateway-demo.jar com.wf.demo.Producer \
+      --config "/etc/kafka-client/${CLIENT_USER:-alice}-internal.properties" "$@" 2>&1 | tee /proc/1/fd/1
+  consumer: |
+    #!/bin/sh
+    java $JAVA_OPTS -cp /app/gateway-demo.jar com.wf.demo.Consumer \
+      --config "/etc/kafka-client/${CLIENT_USER:-alice}-internal.properties" "$@" 2>&1 | tee /proc/1/fd/1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: internal-client
+  namespace: clients
+  labels: { app: internal-client }
+spec:
+  containers:
+    - name: client
+      image: eclipse-temurin:21-jre
+      command: [sh, -c, 'echo "internal-client ready"; exec sleep infinity']
+      env:
+        - name: PATH
+          value: /opt/client-bin:/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      resources:
+        requests: { cpu: 250m, memory: 512Mi }
+        limits: { memory: 1Gi }
+      volumeMounts:
+        - { name: app, mountPath: /app }
+        - { name: client-config, mountPath: /etc/kafka-client, readOnly: true }
+        - { name: bin, mountPath: /opt/client-bin }
+  volumes:
+    - name: app
+      emptyDir: {}
+    - name: client-config
+      secret:
+        secretName: internal-client
+        defaultMode: 0400
+    - name: bin
+      configMap:
+        name: internal-client-bin
+        defaultMode: 0755

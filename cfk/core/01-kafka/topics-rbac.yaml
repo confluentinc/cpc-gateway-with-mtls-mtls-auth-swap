@@ -1,0 +1,54 @@
+# Demo topic and alice's role bindings. bob intentionally has none (negative tests).
+apiVersion: platform.confluent.io/v1beta1
+kind: KafkaTopic
+metadata:
+  name: demo-orders
+  namespace: confluent
+spec:
+  replicas: 3
+  partitionCount: 6
+  configs:
+    min.insync.replicas: "2"
+  kafkaRestClassRef:
+    name: default
+---
+# Produce to this topic is fenced at the Gateway (cfk/dmz/01-gateway/gateway.yaml); direct produce still works.
+apiVersion: platform.confluent.io/v1beta1
+kind: KafkaTopic
+metadata:
+  name: demo-fenced
+  namespace: confluent
+spec:
+  replicas: 3
+  partitionCount: 3
+  configs:
+    min.insync.replicas: "2"
+  kafkaRestClassRef:
+    name: default
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: alice-demo-topics-write
+  namespace: confluent
+spec:
+  principal: { type: user, name: alice }
+  role: DeveloperWrite
+  resourcePatterns:
+    - { resourceType: Topic, name: demo-, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: alice-demo-topics-read
+  namespace: confluent
+spec:
+  principal: { type: user, name: alice }
+  role: DeveloperRead
+  resourcePatterns:
+    - { resourceType: Topic, name: demo-, patternType: PREFIXED }
+    - { resourceType: Group, name: demo-, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default

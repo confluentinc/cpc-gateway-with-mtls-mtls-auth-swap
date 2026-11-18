@@ -1,0 +1,28 @@
+# Applied to the CORE cluster. The Gateway terminates client TLS and opens its own mTLS session to the brokers,
+# so the brokers see one principal for all Gateway traffic: User:cpcgw-dmz-client. Scope it to the demo topics only.
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: cpcgw-dmz-client-demo-topics-write
+  namespace: confluent
+spec:
+  principal: { type: user, name: cpcgw-dmz-client }
+  role: DeveloperWrite
+  resourcePatterns:
+    - { resourceType: Topic, name: demo-, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: cpcgw-dmz-client-demo-topics-read
+  namespace: confluent
+spec:
+  principal: { type: user, name: cpcgw-dmz-client }
+  role: DeveloperRead
+  resourcePatterns:
+    - { resourceType: Topic, name: demo-, patternType: PREFIXED }
+    - { resourceType: Group, name: demo-, patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default

@@ -1,0 +1,87 @@
+# Architecture reference
+
+Names below use the `config.env` settings: `<PUBLIC_ZONE>`, `<PRIVATE_ZONE>`, `<CORE>` and `<DMZ>` (cluster names).
+
+## Endpoints
+
+| Endpoint | Where | Who uses it | Authentication |
+| --- | --- | --- | --- |
+| `kafka.gateway.<PUBLIC_ZONE>:9092`, `b0..b2.kafka.gateway.<PUBLIC_ZONE>` | Internet-facing NLB in the DMZ (allowlist, port 9092 only) | External clients | mTLS, client certificate from the demo CA |
+| `https://sr.<PUBLIC_ZONE>` | Internet-facing ALB in the DMZ (ACM certificate) → read-only SR followers | External serializers | LDAP basic auth (checked by MDS), read roles only |
+| `kafka.<PRIVATE_ZONE>:9092`, `b0..b2.<PRIVATE_ZONE>` | Internal NLBs in the core | Gateway, read-only SR followers, core apps | mTLS |
+| `https://sr.<PRIVATE_ZONE>` | Internal NLB in the core → core SR | Gateway (governance, DEKs), core apps | LDAP basic auth |
+| `https://mds.<PRIVATE_ZONE>:8090` | Internal NLB in the core, DMZ private subnets only | Read-only SR followers | mTLS |
+| `loki.<PRIVATE_ZONE>:3100` | Internal NLB in the core, DMZ VPC only | DMZ Alloy and Grafana | none (network only) |
+| Control Center, Grafana, Prometheus | ClusterIP services | Operators, through `kubectl port-forward` | C3: LDAP; Grafana: admin password |
+
+## Network
+
+- Two VPCs (`CORE_VPC_CIDR`, `DMZ_VPC_CIDR`), three AZs each, peered. Routes exist only between the private subnets.
+- DMZ private subnets → core: network ACL allows only 9092 (Kafka), 443 (core SR), 8090 (MDS) and 3100 (Loki), plus
+  return traffic. The DMZ public subnets (load balancers, NAT) have no route to the core and their ACL denies it.
+- The core can't open connections into the DMZ: DMZ security groups admit nothing from the core CIDR.
+- Public ALB → DMZ SR pods on 8081 only; Gateway NLB security group admits 9092 from `PUBLIC_ALLOWED_CIDRS`
+  (CFK also publishes 9180/9190 on that service; the security group blocks them).
+
+## Identities and role bindings
+
+Certificate CNs are the Kafka principals (mapping rule `CN=(...)`). LDAP users are the SR and Control Center logins.
+
+| Principal | Kind | Used by | Main permissions |
+| --- | --- | --- | --- |
+| `kafka`, `kraftcontroller` | certificate | brokers, controllers | super users |
+| `sr` | certificate | core SR | CFK-created SR bindings; DEK registry and exporter topics |
+| `sr-ro` | certificate | read-only SR leader (core) | CFK-created bindings for `id_schemaregistry-ro_confluent` |
+| `sr-dmz` | certificate | read-only SR followers (DMZ) | same cluster's store topic and group, license topics (`06-schema-linking/rbac.yaml`) |
+| `c3` | certificate + LDAP | Control Center | SystemAdmin (CFK-created) |
+| `cpcgw-dmz-client` | certificate | Gateway → brokers | `demo-*` topics and groups (`dmz/01-gateway/core-rbac.yaml`) |
+| `cpcgw-dmz-sr-client` | LDAP | Gateway → core SR | read `demo-*` subjects, the payments KEK |
+| `sr-exporter` | LDAP | schema link → read-only cluster | ResourceOwner on all subjects and KEKs of the read-only cluster |
+| `alice` | certificate + LDAP | demo app user | `demo-*` topics, groups and subjects (read only on the read-only cluster) |
+| `bob` | certificate + LDAP | negative tests | none |
+| `testadmin` | LDAP | administrator | ClusterAdmin on Kafka, SystemAdmin on both SR clusters |
+
+Traffic through the Gateway reaches the brokers as `cpcgw-dmz-client`, whichever client certificate was presented.
+
+## Secrets
+
+| Secret | Namespace | Created by | Content |
+| --- | --- | --- | --- |
+| `tls-*`, `cpcgw-dmz-*-tls`, `client-*-tls` | `confluent` (core) | cert-manager, `00-platform/certificates.yaml` and `06-schema-linking/certificates.yaml` | PEM certificate, key, CA |
+| copies of `cpcgw-dmz-*-tls`, `tls-schemaregistry-dmz`, `cpcgw-dmz-ca` | `gateway` (DMZ) | `dmz/00-platform`, `dmz/02-schema-registry` | copied from the core; no CA key in the DMZ |
+| `ldap-env`, `ldap-ldifs` | `confluent` | `00-platform/deploy.sh` | LDAP admin passwords, bootstrap users and groups |
+| `mds-token` (key pair), `mds-token-public` (DMZ) | both | `01-kafka`, `dmz/02-schema-registry` | MDS token signing key / public key only |
+| `mds-ldap-bind` | `confluent` | `01-kafka/deploy.sh` | MDS bind user for LDAP |
+| `confluent-license` | both | `02-schema-registry`, `dmz/02-schema-registry` | license JWT from `CONFLUENT_LICENSE_FILE` |
+| `sr-password-encoder` | `confluent` | `02-schema-registry/deploy.sh` | encrypts the exporter's stored credentials |
+| `c3-sr-basic`, `cpcgw-dmz-sr-credentials` | both | step scripts | LDAP logins for C3 and the Gateway |
+| `aws-kms-role-params` | `gateway` | `dmz/01-gateway/kms-irsa.yaml` | IAM role the encryption executors assume |
+| `grafana-admin` | `monitoring` | `dmz/03-monitoring/deploy.sh` | Grafana admin password |
+
+Every generated value has a local copy in `.secrets/` so steps can be re-run without rotating anything.
+
+## Schema linking
+
+```
+core SR (writable, private) --exporter dmz-readonly, all subjects, same IDs--> read-only SR cluster
+                                                                    leader:    schemaregistry-ro (core, IMPORT mode)
+                                                                    followers: schemaregistry-dmz x2 (DMZ, leader.eligibility=false)
+                                                                               <- public ALB <- external clients
+```
+
+The followers join the read-only cluster through its Kafka topic `_schemas_schemaregistry-ro_confluent` and group
+`id_schemaregistry-ro_confluent`. They have no DEK registry and no exporter API, so keys never reach the DMZ. Writes
+sent to them are forwarded to the leader, where users only hold read roles and IMPORT mode admits only the exporter.
+
+## Gateway configuration notes
+
+- Route `sni-route-core`: SNI host routing (`b$(nodeId).kafka.gateway.<PUBLIC_ZONE>`), TLS termination with the
+  Gateway server certificate, and a new mTLS session to the brokers as `cpcgw-dmz-client`.
+- `configOverrides.server` sets `routes.sni-route-core.security.auth: passthrough` and
+  `security.ssl.clientAuth: required`. Verified: without them a client with no certificate can produce through the
+  Gateway; with them it is refused in the TLS handshake (`PEER_DID_NOT_RETURN_A_CERTIFICATE` in the Gateway log). The
+  CRD field `security.client.authentication.type: mtls` does not work as a replacement in CFK 3.4.0 / Gateway 1.4.0
+  (mapping rules are rendered empty and the Gateway does not start).
+- Data governance: schema validation on `demo-payments` (subject `demo-payments-value`), rule executors for
+  ENCRYPT with the IAM role from Terraform. `demo-orders` and `demo-fenced` are excluded from validation.
+- Fencing: `rules.fencing` blocks PRODUCE to `demo-fenced` on this route only.

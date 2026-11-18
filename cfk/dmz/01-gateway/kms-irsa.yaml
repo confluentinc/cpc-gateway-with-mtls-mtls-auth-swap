@@ -1,0 +1,19 @@
+# Gateway field encryption with AWS KMS (terraform/dmz/gateway-kms.tf). The pods run as this service account, so
+# IRSA gives them cfk-dmz-cpcgw-irsa as base credentials; the KMS driver then assumes role.arn for the KEK calls.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cpcgw-dmz
+  namespace: gateway
+  annotations:
+    eks.amazonaws.com/role-arn: ${GATEWAY_IRSA_ROLE_ARN}
+---
+# Each key becomes a parameter of the encryptField / encryptPayload rule executors.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-kms-role-params
+  namespace: gateway
+type: Opaque
+stringData:
+  role.arn: ${GATEWAY_KMS_ROLE_ARN}

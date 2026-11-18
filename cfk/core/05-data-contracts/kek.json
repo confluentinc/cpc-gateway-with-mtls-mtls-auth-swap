@@ -1,0 +1,7 @@
+{
+  "name": "payments-kek",
+  "kmsType": "aws-kms",
+  "kmsKeyId": "${PAYMENTS_KEK_ARN}",
+  "doc": "KEK for demo-payments PII fields; the Gateway wraps DEKs with it through its KMS role",
+  "shared": false
+}

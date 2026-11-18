@@ -1,0 +1,4 @@
+# CFK operator in the DMZ cluster: manages only the Gateway namespace.
+namespaced: true
+namespaceList:
+  - gateway

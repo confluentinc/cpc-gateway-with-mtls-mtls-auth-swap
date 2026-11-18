@@ -1,0 +1,42 @@
+{
+  "domainRules": [
+    {
+      "name": "amount-positive",
+      "kind": "CONDITION",
+      "type": "CEL",
+      "mode": "WRITE",
+      "expr": "message.amount > 0.0",
+      "onFailure": "ERROR"
+    },
+    {
+      "name": "currency-allowed",
+      "kind": "CONDITION",
+      "type": "CEL",
+      "mode": "WRITE",
+      "expr": "message.currency in ['USD', 'EUR', 'GBP']",
+      "onFailure": "ERROR"
+    },
+    {
+      "name": "card-number-16-digits",
+      "kind": "CONDITION",
+      "type": "CEL",
+      "mode": "WRITE",
+      "expr": "message.card_number.matches('^[0-9]{16}$')",
+      "onFailure": "ERROR"
+    },
+    {
+      "name": "encrypt-pii",
+      "kind": "TRANSFORM",
+      "type": "ENCRYPT",
+      "mode": "WRITEREAD",
+      "onFailure": "ERROR,ERROR",
+      "tags": ["PII"],
+      "params": {
+        "encrypt.kek.name": "payments-kek",
+        "encrypt.kms.type": "aws-kms",
+        "encrypt.kms.key.id": "${PAYMENTS_KEK_ARN}"
+      }
+    }
+  ],
+  "enableAt": "GATEWAY"
+}
