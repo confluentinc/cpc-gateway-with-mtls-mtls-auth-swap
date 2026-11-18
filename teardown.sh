@@ -26,6 +26,11 @@ wait_no_lb() {  # <kcore|kdmz>: until no LoadBalancer services and no TargetGrou
   die "load balancers still present; check the AWS Load Balancer Controller logs"
 }
 delete_ns() { "$1" delete ns "${@:2}" --ignore-not-found --wait=true --timeout=600s; }
+delete_cfk_rest() {  # <kcore|kdmz> <ns>: CFK resources carry operator finalizers, so delete them all before uninstalling it
+  local kinds
+  kinds=$("$1" api-resources --api-group=platform.confluent.io --namespaced -o name | paste -sd, -)
+  [[ -z "$kinds" ]] || "$1" -n "$2" delete "$kinds" --all --ignore-not-found --wait=true --timeout=300s
+}
 
 if ctx_ok "$DMZ_CTX"; then
   step "DMZ workloads"
@@ -34,6 +39,7 @@ if ctx_ok "$DMZ_CTX"; then
   kdmz -n gateway delete targetgroupbinding --all --ignore-not-found --wait=true --timeout=300s
   delete_ns kdmz monitoring
   wait_no_lb kdmz
+  delete_cfk_rest kdmz gateway
   hdmz uninstall confluent-operator -n gateway --ignore-not-found --wait
   delete_ns kdmz gateway
 fi
@@ -48,7 +54,9 @@ if ctx_ok "$CORE_CTX"; then
   kcore -n confluent delete svc mds-lb --ignore-not-found
   delete_ns kcore logging
   wait_no_lb kcore
+  kcore -n confluent delete statefulset ldap --ignore-not-found --wait=true --timeout=300s
   kcore -n confluent delete pvc --all --ignore-not-found --wait=true --timeout=300s
+  delete_cfk_rest kcore confluent
   hcore uninstall confluent-operator -n confluent --ignore-not-found --wait
   delete_ns kcore confluent
 fi
