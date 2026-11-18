@@ -57,22 +57,47 @@ The brokers never see the client's certificate: every Gateway connection is `Use
 authorization at the brokers would need the Gateway's identity mode (principal mapping), which CFK 3.4.0 doesn't
 render correctly (see [architecture.md](architecture.md#gateway-configuration-notes)).
 
-## Permissions for the Gateway's identities
+## Permissions: client identity vs Gateway identity
 
-The Gateway uses two identities in the core. Both need role bindings in the core cluster's RBAC (MDS).
+An external application has one identity: its certificate (CN, e.g. `alice`) for Kafka and an LDAP login (same name)
+for the schema registry. The Gateway has two identities of its own. All role bindings live in the core's RBAC (MDS).
 
-| Principal | How it authenticates | Role | Resource | Why |
-| --- | --- | --- | --- | --- |
-| `User:cpcgw-dmz-client` | certificate CN, to the brokers | `DeveloperWrite` | Topic `demo-` (prefixed) | produce |
-| | | `DeveloperRead` | Topic `demo-` (prefixed) | consume, fetch metadata |
-| | | `DeveloperRead` | Group `demo-` (prefixed) | consumer groups and offset commits |
-| `User:cpcgw-dmz-sr-client` | LDAP basic auth, to the core schema registry | `DeveloperRead` | Subject `demo-` (prefixed) | fetch schemas and rules for validation |
-| | | `DeveloperWrite` | KEK `payments-kek` | read the KEK and register the DEKs it generates for field encryption |
+**Kafka**
 
-Defined in `cfk/dmz/01-gateway/core-rbac.yaml` (brokers) and `cfk/core/02-schema-registry/rbac.yaml` (schema
-registry). Nothing else is needed: no cluster-level role, and no `IdempotentWrite` (producers are idempotent by
-default and passed with these bindings). The Gateway never needs AWS credentials for Kafka; KMS access is a separate
-IAM role.
+| Hop | Principal | Checked by | Needs |
+| --- | --- | --- | --- |
+| Client → Gateway | `alice` (certificate CN) | the Gateway, TLS only: the certificate must chain to the trusted CA | no role bindings. The Gateway does not authorize; any certificate from the CA gets in |
+| Gateway → brokers | `User:cpcgw-dmz-client` (Gateway certificate) | brokers (RBAC) | `DeveloperWrite` on Topic `demo-` (prefixed) to produce; `DeveloperRead` on Topic `demo-` and Group `demo-` (prefixed) to consume and commit offsets |
+| Client → brokers directly (internal apps only) | `alice` | brokers (RBAC) | same roles as above, bound to `alice` (`cfk/core/01-kafka/topics-rbac.yaml`). Not used through the Gateway; the in-cluster client pod uses them |
+
+So for Kafka, the client's own role bindings don't apply through the Gateway. The Gateway's principal is what the
+brokers authorize, and the CA (plus the IP allowlist) decides who may use the Gateway at all. To keep two external
+applications apart at the brokers, give each its own route and streaming domain with its own upstream certificate
+(and principal).
+
+**Schema Registry**
+
+| Hop | Principal | Checked by | Needs |
+| --- | --- | --- | --- |
+| Client serializer → public SR (`sr.<PUBLIC_ZONE>`, read-only cluster) | `alice` (LDAP) | DMZ followers, through MDS | `DeveloperRead` on Subject `demo-` (prefixed) in cluster `id_schemaregistry-ro_confluent`. No write: clients set `auto.register.schemas=false`, and the public registry refuses writes anyway |
+| Gateway → core SR (`sr.<PRIVATE_ZONE>`) | `cpcgw-dmz-sr-client` (LDAP) | core SR, through MDS | `DeveloperRead` on Subject `demo-` (prefixed) to fetch schemas and rules for validation; `DeveloperWrite` on KEK `payments-kek` to read the KEK and register the DEKs it generates |
+| Schema owner → core SR (internal) | `alice` (LDAP) | core SR | `DeveloperRead` and `DeveloperWrite` on Subject `demo-` in `id_schemaregistry_confluent`, to register schemas. Internal only |
+
+Unlike Kafka, the schema registry does see the client's own identity: `bob` (no bindings) is refused by the public
+registry even though his certificate gets through the Gateway.
+
+**Service identities** (set up once, not per application): `sr-dmz` (DMZ followers: store topic and group of the
+read-only cluster, license topics), `sr-exporter` (schema link: ResourceOwner on the read-only cluster's subjects and
+KEKs), `sr-ro` (read-only leader). See [architecture.md](architecture.md#identities-and-role-bindings).
+
+Files: `cfk/dmz/01-gateway/core-rbac.yaml` (Gateway → brokers), `cfk/core/02-schema-registry/rbac.yaml` (core SR),
+`cfk/core/06-schema-linking/rbac.yaml` (read-only cluster), `cfk/core/01-kafka/topics-rbac.yaml` (direct Kafka
+access). The Gateway needs no cluster-level role and no `IdempotentWrite` (producers are idempotent by default and
+passed with these bindings).
+
+**For a new external application**, add: its certificate from the trusted CA; an LDAP user with `DeveloperRead` on
+its subjects in the read-only cluster; Gateway topic and group bindings for its prefix (below); `DeveloperRead` on its
+subjects for `cpcgw-dmz-sr-client`, plus `DeveloperWrite` on its KEK if the topic has encryption rules.
 
 Because every external client reaches the brokers as `cpcgw-dmz-client`, its bindings are the most that any external
 application can do. Grant it the union of what the external applications need, and nothing that only internal
@@ -94,8 +119,7 @@ spec:
 ```
 
 Not covered by the demo (add if needed, untested here): transactional producers need `DeveloperWrite` on their
-`TransactionalId`; a governed topic also needs `DeveloperRead` on its subject for `cpcgw-dmz-sr-client`, and
-`DeveloperWrite` on its KEK if it has encryption rules.
+`TransactionalId`.
 
 ## Certificates
 
