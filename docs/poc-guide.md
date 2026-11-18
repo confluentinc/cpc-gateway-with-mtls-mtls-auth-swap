@@ -57,6 +57,46 @@ The brokers never see the client's certificate: every Gateway connection is `Use
 authorization at the brokers would need the Gateway's identity mode (principal mapping), which CFK 3.4.0 doesn't
 render correctly (see [architecture.md](architecture.md#gateway-configuration-notes)).
 
+## Permissions for the Gateway's identities
+
+The Gateway uses two identities in the core. Both need role bindings in the core cluster's RBAC (MDS).
+
+| Principal | How it authenticates | Role | Resource | Why |
+| --- | --- | --- | --- | --- |
+| `User:cpcgw-dmz-client` | certificate CN, to the brokers | `DeveloperWrite` | Topic `demo-` (prefixed) | produce |
+| | | `DeveloperRead` | Topic `demo-` (prefixed) | consume, fetch metadata |
+| | | `DeveloperRead` | Group `demo-` (prefixed) | consumer groups and offset commits |
+| `User:cpcgw-dmz-sr-client` | LDAP basic auth, to the core schema registry | `DeveloperRead` | Subject `demo-` (prefixed) | fetch schemas and rules for validation |
+| | | `DeveloperWrite` | KEK `payments-kek` | read the KEK and register the DEKs it generates for field encryption |
+
+Defined in `cfk/dmz/01-gateway/core-rbac.yaml` (brokers) and `cfk/core/02-schema-registry/rbac.yaml` (schema
+registry). Nothing else is needed: no cluster-level role, and no `IdempotentWrite` (producers are idempotent by
+default and passed with these bindings). The Gateway never needs AWS credentials for Kafka; KMS access is a separate
+IAM role.
+
+Because every external client reaches the brokers as `cpcgw-dmz-client`, its bindings are the most that any external
+application can do. Grant it the union of what the external applications need, and nothing that only internal
+applications use. For the customer's topics, copy the bindings with their prefix:
+
+```yaml
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: cpcgw-dmz-client-orders-write
+  namespace: confluent
+spec:
+  principal: { type: user, name: cpcgw-dmz-client }
+  role: DeveloperWrite                       # DeveloperRead for consumers; add a Group pattern for their group ids
+  resourcePatterns:
+    - { resourceType: Topic, name: orders., patternType: PREFIXED }
+  kafkaRestClassRef:
+    name: default
+```
+
+Not covered by the demo (add if needed, untested here): transactional producers need `DeveloperWrite` on their
+`TransactionalId`; a governed topic also needs `DeveloperRead` on its subject for `cpcgw-dmz-sr-client`, and
+`DeveloperWrite` on its KEK if it has encryption rules.
+
 ## Certificates
 
 All are cert-manager `Certificate` resources signed by `ClusterIssuer wf-demo-ca` in the core cluster. Each secret has
