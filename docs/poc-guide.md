@@ -2,7 +2,7 @@
 
 What a customer needs to have ready, who authenticates to whom, where every pod runs, and a POC plan with pass
 criteria. Setup commands are in the [README](../README.md); identities, network rules and secrets in
-[architecture.md](architecture.md).
+[architecture.md](architecture.md). Confluent's Gateway documentation is listed under [References](#references).
 
 ## What the POC proves
 
@@ -41,6 +41,9 @@ Optional, to use your own instead of the demo ones (see [Use your own pieces](..
 | Client identities | alice, bob | one certificate per application, CN = the principal used in role bindings |
 
 ## Authentication per hop
+
+Gateway options for client and cluster authentication, TLS and secret stores:
+[Configure Security for Confluent Gateway](https://docs.confluent.io/operator/current/gateway/co-gateway-security.html).
 
 | From → to | Transport | Client proves identity with | Server proves identity with | Authorization |
 | --- | --- | --- | --- | --- |
@@ -174,6 +177,9 @@ Nothing holding data or keys runs in the DMZ: no brokers, no CA key, no DEK regi
 
 ## Health, availability and observability
 
+Admin endpoints, liveness and metrics settings:
+[Configure administration and metrics](https://docs.confluent.io/operator/current/gateway/co-gateway-deploy.html#configure-administration-and-metrics).
+
 **Health checks**
 
 | Component | Check | Used by |
@@ -239,3 +245,16 @@ In an existing network, request exactly these flows from the firewall team.
 | 5. Customer data | customer | add their topics, role bindings and schemas (see [Use your own pieces](../README.md#use-your-own-pieces)); issue a certificate per application; run their client with a config like `.secrets/clients/alice-gateway.properties` | their app produces and consumes through the Gateway |
 | 6. Review | both | go through [Before production](../README.md#before-production) | open items listed |
 | 7. Tear down | either | `./teardown.sh -y` (about 40 min) | exits 0; only KMS keys remain, pending deletion (payments key 7 days, EKS keys 30 days) |
+
+## References
+
+Confluent for Kubernetes, Confluent Gateway:
+
+| Page | Covers | Used in this repo by |
+| --- | --- | --- |
+| [Configure Security](https://docs.confluent.io/operator/current/gateway/co-gateway-security.html) | client and cluster authentication (passthrough, swap), TLS, passwords, secret stores | route `security` and `configOverrides` in `cfk/dmz/01-gateway/gateway.yaml` |
+| [Data governance](https://docs.confluent.io/operator/current/gateway/co-gateway-governance.html) | schema validation, rule executors (CEL, encryption), Schema Registry connection | `policies.dataGovernance` in `gateway.yaml`, `cfk/core/05-data-contracts` |
+| [Configure administration and metrics](https://docs.confluent.io/operator/current/gateway/co-gateway-deploy.html#configure-administration-and-metrics) | admin port 9190, `/livez`, `/metrics`, JVM metrics | Prometheus scrape in `cfk/dmz/03-monitoring` |
+
+Where this repo deliberately differs from those pages (for example `clientAuth` set through `configOverrides`),
+the reason is written next to the setting and in [architecture.md](architecture.md#gateway-configuration-notes).
