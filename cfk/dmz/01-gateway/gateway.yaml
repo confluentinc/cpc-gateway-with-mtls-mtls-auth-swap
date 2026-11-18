@@ -63,13 +63,12 @@ spec:
           - blocked: true
             topics: [demo-fenced]
             trafficType: PRODUCE
-  # Required. Without them CFK renders no clientAuth and the Gateway accepts clients that present no certificate.
-  # The CRD alternative (security.client.authentication.type: mtls) is not usable with CFK 3.4.0 / Gateway 1.4.0:
-  # CFK renders its principalMappingRules empty and the Gateway refuses to start ("principalMappingRules cannot be
-  # null or empty").
+  # Required: without it CFK renders no clientAuth and the Gateway accepts clients that present no certificate.
+  # The CRD alternative (security.client.authentication.type: mtls) switches the route to identity mode and is not
+  # usable with CFK 3.4.0 / Gateway 1.4.0: CFK renders its principalMappingRules empty and the Gateway refuses to start.
+  # Passthrough (the Gateway connects upstream with its own certificate) is the default and needs no setting.
   configOverrides:
     server:
-      routes.sni-route-core.security.auth: passthrough
       routes.sni-route-core.security.ssl.clientAuth: required
   policies:
     dataGovernance:

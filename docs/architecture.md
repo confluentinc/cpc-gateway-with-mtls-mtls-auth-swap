@@ -77,11 +77,11 @@ sent to them are forwarded to the leader, where users only hold read roles and I
 
 - Route `sni-route-core`: SNI host routing (`b$(nodeId).kafka.gateway.<PUBLIC_ZONE>`), TLS termination with the
   Gateway server certificate, and a new mTLS session to the brokers as `cpcgw-dmz-client`.
-- `configOverrides.server` sets `routes.sni-route-core.security.auth: passthrough` and
-  `security.ssl.clientAuth: required`. Verified: without them a client with no certificate can produce through the
-  Gateway; with them it is refused in the TLS handshake (`PEER_DID_NOT_RETURN_A_CERTIFICATE` in the Gateway log). The
-  CRD field `security.client.authentication.type: mtls` does not work as a replacement in CFK 3.4.0 / Gateway 1.4.0
-  (mapping rules are rendered empty and the Gateway does not start).
+- `configOverrides.server` sets `routes.sni-route-core.security.ssl.clientAuth: required`. Verified: without it a
+  client with no certificate can produce through the Gateway; with it the client is refused in the TLS handshake
+  (`PEER_DID_NOT_RETURN_A_CERTIFICATE` in the Gateway log). `auth: passthrough` is the default in CFK 3.4 (the CRD
+  field was removed) and needs no override. The CRD field `security.client.authentication.type: mtls` is identity
+  mode, not a replacement: CFK 3.4.0 renders its mapping rules empty and Gateway 1.4.0 does not start.
 - Data governance: schema validation on `demo-payments` (subject `demo-payments-value`), rule executors for
   ENCRYPT with the IAM role from Terraform. `demo-orders` and `demo-fenced` are excluded from validation.
 - Fencing: `rules.fencing` blocks PRODUCE to `demo-fenced` on this route only.
