@@ -12,7 +12,8 @@ External clients only ever reach the two public names. The brokers, MDS and the 
 core VPC; the VPC peering and network ACLs let the DMZ open only Kafka, SR, MDS and Loki connections to the core.
 Diagram (drawn with the reference names `wf.dspdemos.com` / `internal.dspdemos.com`):
 [docs/architecture.html](docs/architecture.html). Endpoints, network rules, identities and secrets:
-[docs/architecture.md](docs/architecture.md).
+[docs/architecture.md](docs/architecture.md). Running a customer POC (access to request, authentication per hop,
+certificates, pod placement, runbook): [docs/poc-guide.md](docs/poc-guide.md).
 
 ## Prerequisites
 

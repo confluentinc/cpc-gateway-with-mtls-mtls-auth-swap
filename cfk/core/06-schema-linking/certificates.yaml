@@ -20,7 +20,7 @@ spec:
   secretName: tls-schemaregistry-ro
   issuerRef: { kind: ClusterIssuer, name: wf-demo-ca }
 ---
-# Copied to the DMZ cluster (gateway namespace) by cfk/dmz/04-schema-registry/deploy.sh.
+# Copied to the DMZ cluster (gateway namespace) by cfk/dmz/02-schema-registry/deploy.sh.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

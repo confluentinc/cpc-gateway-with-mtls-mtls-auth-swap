@@ -2,6 +2,15 @@
 # "mTLS to mTLS (SNI routing)" pattern. Clients present a certificate from the WF demo CA to the Gateway; the Gateway
 # ends that TLS session and opens its own mTLS session to the core brokers as CN=cpcgw-dmz-client (auth: passthrough,
 # no SASL). Clients only ever see ${GATEWAY_DOMAIN} / b<N>.${GATEWAY_DOMAIN}.
+#
+# Certificates (all issued by the core's cert-manager ClusterIssuer wf-demo-ca, copied here by cfk/dmz/00-platform):
+#   client -> Gateway   server side  cpcgw-dmz-server-tls  CN/SAN ${GATEWAY_DOMAIN}, *.${GATEWAY_DOMAIN}
+#                       client side  the client's own cert (alice, bob, ...), verified against ca.crt in the same secret
+#   Gateway -> brokers  client side  cpcgw-dmz-client-tls  CN=cpcgw-dmz-client = the Kafka principal for all traffic
+#                       server side  the brokers' tls-kafka, verified against ca.crt in cpcgw-dmz-client-tls
+#   Gateway -> core SR  server side  tls-schemaregistry, verified against cpcgw-dmz-ca; the Gateway logs in with
+#                                    LDAP basic auth (cpcgw-dmz-sr-credentials), not a certificate
+# With your own CA, each secret keeps the keys tls.crt, tls.key and ca.crt (ca.crt = the chain that signed the peer).
 apiVersion: platform.confluent.io/v1beta1
 kind: Gateway
 metadata:
@@ -39,6 +48,8 @@ spec:
           - id: core-mtls
             endpoint: kafka.${PRIVATE_ZONE}:9092
             tls:
+              # Upstream mTLS. tls.crt/tls.key: what the Gateway presents TO the brokers (CN=cpcgw-dmz-client).
+              # ca.crt: trusts the brokers' certificate.
               secretRef: cpcgw-dmz-client-tls
         nodeIdRanges:
           - name: brokers
@@ -56,6 +67,8 @@ spec:
       security:
         client:
           tls:
+            # Downstream TLS. tls.crt/tls.key: the Gateway's server certificate shown to clients.
+            # ca.crt: validates the CLIENT certificates (enforced by clientAuth: required below).
             secretRef: cpcgw-dmz-server-tls
       # Route fencing demo: the Gateway refuses produce requests to demo-fenced; every other topic is unaffected.
       rules:
@@ -81,6 +94,7 @@ spec:
             secretRef: cpcgw-dmz-sr-credentials
         tls:
           enabled: true
+          # ca.crt only: trusts the core Schema Registry's certificate (sr.${PRIVATE_ZONE}).
           secretRef: cpcgw-dmz-ca
         # Run the ENCRYPT / ENCRYPT_PAYLOAD rules of schemas with enableAt: GATEWAY. KEKs are aws-kms keys; the
         # executors assume the role.arn in aws-kms-role-params on top of the pod's IRSA credentials.
