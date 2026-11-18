@@ -1,0 +1,14 @@
+name: cpc-gateway-with-mtls-mtls-auth-swap
+lang: unknown
+lang_version: unknown
+git:
+  enable: true
+codeowners:
+  enable: true
+renovatebot:
+  enable: true
+automerge:
+  renovate:
+    enable: true
+semaphore:
+  enable: false
