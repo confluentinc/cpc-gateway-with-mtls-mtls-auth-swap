@@ -84,4 +84,4 @@ for stack in dmz core; do
   terraform -chdir="$ROOT/terraform/$stack" destroy -input=false $AUTO_APPROVE
 done
 for c in "$DMZ_CTX" "$CORE_CTX"; do kubectl config delete-context "$c" >/dev/null 2>&1 || true; done
-echo "Done. KMS keys are scheduled for deletion (AWS minimum: 7 days)."
+echo "Done. KMS keys are scheduled for deletion (payments key: 7 days, EKS keys: 30 days)."

@@ -94,7 +94,8 @@ The full walkthrough (encryption, AuthN failures, fencing, schema linking, Contr
 ```
 
 It deletes the workloads first, so Kubernetes removes their load balancers, DNS records and volumes, then runs
-`terraform destroy` for the DMZ and the core. `.secrets/` stays. KMS keys enter the 7-day deletion window.
+`terraform destroy` for the DMZ and the core. `.secrets/` stays. KMS keys are scheduled for deletion: 7 days for the payments key, 30 for the
+EKS secret-encryption keys.
 
 ## Layout
 

@@ -53,9 +53,18 @@ Optional, to use your own instead of the demo ones (see [Use your own pieces](..
 | Core SR → read-only SR (schema link) | HTTPS, in-cluster | LDAP basic auth `sr-exporter` | `tls-schemaregistry-ro` | ResourceOwner on the read-only cluster's subjects |
 | Core components ↔ each other | mTLS | `tls-*` per component (CN = principal) | same | RBAC via MDS; `kafka` and `kraftcontroller` are super users |
 
-The brokers never see the client's certificate: every Gateway connection is `User:cpcgw-dmz-client`. Per-client
-authorization at the brokers would need the Gateway's identity mode (principal mapping), which CFK 3.4.0 doesn't
-render correctly (see [architecture.md](architecture.md#gateway-configuration-notes)).
+The brokers never see the client's certificate: every Gateway connection is `User:cpcgw-dmz-client`. That's fine
+for a POC, but Confluent recommends a dedicated broker credential per client. Gateway → broker credentials can only be
+SASL/PLAIN, SASL/OAUTHBEARER or none (no per-client certificates), so per-client authorization means:
+
+1. adding a SASL/PLAIN or OAUTHBEARER listener on the brokers;
+2. on the route, `security.client.authentication.type: mtls` with `principalMappingRules`, which turns each client
+   certificate CN into a principal;
+3. `security.cluster.core.auth: swap` with a secret store (AWS Secrets Manager, Vault, Azure Key Vault or file) that
+   maps each principal to its broker credential. The Gateway's IAM role needs `secretsmanager:GetSecretValue` on
+   those secrets.
+
+See the Gateway security page in the CFK 3.4 docs. Route authentication is Early Access in CFK 3.4.
 
 ## Certificates
 
@@ -108,6 +117,50 @@ in public subnets.
 
 Nothing holding data or keys runs in the DMZ: no brokers, no CA key, no DEK registry, no MDS signing key.
 
+## Health, availability and observability
+
+**Health checks**
+
+| Component | Check | Used by |
+| --- | --- | --- |
+| Gateway | `http://<pod>:9190/livez` (admin port, inside the cluster only) | Kubernetes probes (check with `kubectl -n gateway get deploy cpcgw-dmz -o jsonpath='{.spec.template.spec.containers[0].livenessProbe}'`) |
+| Gateway NLB | TCP on 9092 per pod IP (AWS Load Balancer Controller default) | NLB stops routing to an unhealthy pod |
+| DMZ SR followers | HTTPS `/` on 8081, `200` or `401` = healthy (`terraform/dmz/sr-alb.tf`) | public ALB |
+| Kafka, KRaft, core SR, C3 | CFK-managed probes | Kubernetes |
+| Everything | `./check.sh` | you, after any change |
+
+**Availability**
+
+- Gateway: 3 stateless replicas, one per AZ, behind a cross-zone NLB. Losing a pod or an AZ drops only that pod's
+  connections; clients reconnect through the same names.
+- Brokers: 3, rack-aware by AZ, replication factor 3, `min.insync.replicas` 2 on the demo topics, so one broker or AZ
+  can fail without losing writes. `FAILOVER=1 ./check.sh kafka` restarts a broker under load.
+- Public schema registry: 2 followers in different AZs behind the ALB. Schemas are cached by serializers, so a short
+  registry outage doesn't stop producing.
+- Single replicas (OpenLDAP, Control Center, read-only SR leader, Prometheus, Grafana, Loki) are fine for a POC; see
+  [Before production](../README.md#before-production).
+- Certificates: the Gateway doesn't reload rotated certificates. After cert-manager renews them (yearly here), run
+  `./setup.sh dmz-platform` to copy them, then change anything in the Gateway spec (for example a pod annotation)
+  so CFK restarts the pods.
+
+**Metrics** (Gateway `/metrics` on 9190, scraped by Prometheus in the DMZ every 5 s, `cfk/dmz/03-monitoring`)
+
+| Grafana dashboard | Shows |
+| --- | --- |
+| Gateway Overview (home) | client and broker connections, bytes and requests per second, requests by API, errors and disconnects, fencing, encryption and decryption counts, heap, GC, CPU |
+| Gateway Metrics | connection and authentication rates, request and response rates, payload sizes |
+| Gateway Advanced Metrics | schema validation outcomes (accepted or rejected) |
+| Gateway JVM Metrics | memory, GC, threads, file descriptors, uptime |
+| Gateway & Broker Logs | TLS rejections, broker authorization denials, WARN and ERROR lines (from Loki) |
+
+Usage per client isn't separated: all traffic reaches the brokers as `cpcgw-dmz-client`. Per-topic usage comes from
+the brokers (Control Center); Gateway request metrics are per route and API.
+
+**Logs**: Alloy ships Gateway logs (DMZ) and broker and KRaft logs (core) to Loki in the core, port 3100.
+
+**Access**: nothing is exposed publicly. Use the port-forwards in [DEMO.md](../DEMO.md) for Grafana (admin,
+`.secrets/grafana-admin.password`) and Control Center (testadmin).
+
 ## Network openings
 
 | Path | Port | Opened by |
@@ -130,4 +183,4 @@ In an existing network, request exactly these flows from the firewall team.
 | 4. Demo | Confluent | walk through [DEMO.md](../DEMO.md) | capabilities 1-8 shown |
 | 5. Customer data | customer | add their topics, role bindings and schemas (see [Use your own pieces](../README.md#use-your-own-pieces)); issue a certificate per application; run their client with a config like `.secrets/clients/alice-gateway.properties` | their app produces and consumes through the Gateway |
 | 6. Review | both | go through [Before production](../README.md#before-production) | open items listed |
-| 7. Tear down | either | `./teardown.sh -y` (about 40 min) | exits 0; only KMS keys remain, in their 7-day deletion window |
+| 7. Tear down | either | `./teardown.sh -y` (about 40 min) | exits 0; only KMS keys remain, pending deletion (payments key 7 days, EKS keys 30 days) |

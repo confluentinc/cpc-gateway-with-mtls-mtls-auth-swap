@@ -102,9 +102,14 @@ back through the follower, it shows as HTTP 500 rather than 422. Sync is unaffec
   Gateway server certificate, and a new mTLS session to the brokers as `cpcgw-dmz-client`.
 - `configOverrides.server` sets `routes.sni-route-core.security.ssl.clientAuth: required`. Verified: without it a
   client with no certificate can produce through the Gateway; with it the client is refused in the TLS handshake
-  (`PEER_DID_NOT_RETURN_A_CERTIFICATE` in the Gateway log). `auth: passthrough` is the default in CFK 3.4 (the CRD
-  field was removed) and needs no override. The CRD field `security.client.authentication.type: mtls` is identity
-  mode, not a replacement: CFK 3.4.0 renders its mapping rules empty and Gateway 1.4.0 does not start.
+  (`PEER_DID_NOT_RETURN_A_CERTIFICATE` in the Gateway log). Passthrough is the default for a streaming domain with
+  no `security.cluster` entry and needs no setting.
+- CRD-native alternative (not yet tested here): the CFK 3.4 docs say mTLS clients require authentication swapping,
+  because TLS ends at the Gateway. The documented form is `security.client.authentication` with `type: mtls`,
+  `mtls.sslClientAuthentication: required` and `principalMappingRules`, plus `security.cluster.core` with
+  `auth: swap` and `authentication.type: none` (no secret store; the Gateway still connects with its own
+  certificate). What failed earlier was `type: mtls` with `auth: passthrough`, which the docs don't support: CFK
+  rendered empty mapping rules and the Gateway didn't start.
 - Data governance: schema validation on `demo-payments` (subject `demo-payments-value`), rule executors for
   ENCRYPT with the IAM role from Terraform. `demo-orders` and `demo-fenced` are excluded from validation.
 - Fencing: `rules.fencing` blocks PRODUCE to `demo-fenced` on this route only.

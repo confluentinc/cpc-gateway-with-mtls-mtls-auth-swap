@@ -77,9 +77,11 @@ spec:
             topics: [demo-fenced]
             trafficType: PRODUCE
   # Required: without it CFK renders no clientAuth and the Gateway accepts clients that present no certificate.
-  # The CRD alternative (security.client.authentication.type: mtls) switches the route to identity mode and is not
-  # usable with CFK 3.4.0 / Gateway 1.4.0: CFK renders its principalMappingRules empty and the Gateway refuses to start.
-  # Passthrough (the Gateway connects upstream with its own certificate) is the default and needs no setting.
+  # Passthrough is the default and needs no setting. The CFK 3.4 docs state that mTLS clients need auth: swap
+  # (TLS terminates here), i.e. security.client.authentication {type: mtls, mtls: {sslClientAuthentication: required,
+  # principalMappingRules: [...]}} plus security.cluster.core {auth: swap, authentication: {type: none}}. That would
+  # replace this override but is untested here; type: mtls with auth: passthrough renders empty principalMappingRules
+  # and the Gateway does not start.
   configOverrides:
     server:
       routes.sni-route-core.security.ssl.clientAuth: required
