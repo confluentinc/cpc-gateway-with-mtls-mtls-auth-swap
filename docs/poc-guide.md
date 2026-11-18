@@ -53,18 +53,9 @@ Optional, to use your own instead of the demo ones (see [Use your own pieces](..
 | Core SR → read-only SR (schema link) | HTTPS, in-cluster | LDAP basic auth `sr-exporter` | `tls-schemaregistry-ro` | ResourceOwner on the read-only cluster's subjects |
 | Core components ↔ each other | mTLS | `tls-*` per component (CN = principal) | same | RBAC via MDS; `kafka` and `kraftcontroller` are super users |
 
-The brokers never see the client's certificate: every Gateway connection is `User:cpcgw-dmz-client`. That's fine
-for a POC, but Confluent recommends a dedicated broker credential per client. Gateway → broker credentials can only be
-SASL/PLAIN, SASL/OAUTHBEARER or none (no per-client certificates), so per-client authorization means:
-
-1. adding a SASL/PLAIN or OAUTHBEARER listener on the brokers;
-2. on the route, `security.client.authentication.type: mtls` with `principalMappingRules`, which turns each client
-   certificate CN into a principal;
-3. `security.cluster.core.auth: swap` with a secret store (AWS Secrets Manager, Vault, Azure Key Vault or file) that
-   maps each principal to its broker credential. The Gateway's IAM role needs `secretsmanager:GetSecretValue` on
-   those secrets.
-
-See the Gateway security page in the CFK 3.4 docs. Route authentication is Early Access in CFK 3.4.
+The brokers never see the client's certificate: every Gateway connection is `User:cpcgw-dmz-client`. Per-client
+authorization at the brokers would need the Gateway's identity mode (principal mapping), which CFK 3.4.0 doesn't
+render correctly (see [architecture.md](architecture.md#gateway-configuration-notes)).
 
 ## Certificates
 
