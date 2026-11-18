@@ -45,6 +45,28 @@ Traffic through the Gateway reaches the brokers as `cpcgw-dmz-client`, whichever
 
 ## Secrets
 
+No Secret manifests are kept in the repo. The step scripts generate credentials into `.secrets/` (git-ignored) on
+first run and create the Kubernetes Secrets from those files with `kubectl create secret ... --dry-run=client -o yaml |
+kubectl apply -f -`. TLS certificates are cert-manager `Certificate` resources and never touch disk.
+
+### Local files (`.secrets/`)
+
+| File | Written by | Used for |
+| --- | --- | --- |
+| `confluent-license.txt` | you (`CONFLUENT_LICENSE_FILE`) | `confluent-license` Secret in both clusters |
+| `passwords.env` | `core-platform` | one `<USER>_PASSWORD` line per LDAP user: `LDAP_ADMIN`, `LDAP_CONFIG`, `LDAP_READONLY_USER`, `KAFKA`, `SR`, `C3`, `CPCGW_SR`, `SR_EXPORTER`, `TESTADMIN`, `ALICE`, `BOB` |
+| `mds-token-keypair.pem`, `mds-token-public.pem` | `core-kafka` | `mds-token` (core), `mds-token-public` (DMZ, public key only) |
+| `sr-password-encoder.txt` | `core-sr` | `sr-password-encoder` |
+| `ca.crt` | `data-contracts` and later steps | demo CA, used locally to call the SR admin API through a port-forward |
+| `grafana-admin.password` | `dmz-monitoring` | `grafana-admin` |
+| `clients/` | `clients` | `truststore.jks`, `<user>.keystore.jks`, `store.password` and `<user>-gateway.properties` for alice and bob; also the `internal-client` Secret |
+
+A missing file is generated; an existing one is reused, so re-running a step never rotates credentials. To bring your
+own, write the file (or the `passwords.env` line) before the step first runs. Delete `.secrets/` (except the license)
+for a fresh set on the next full setup.
+
+### Kubernetes Secrets
+
 | Secret | Namespace | Created by | Content |
 | --- | --- | --- | --- |
 | `tls-*`, `cpcgw-dmz-*-tls`, `client-*-tls` | `confluent` (core) | cert-manager, `00-platform/certificates.yaml` and `06-schema-linking/certificates.yaml` | PEM certificate, key, CA |
@@ -57,8 +79,7 @@ Traffic through the Gateway reaches the brokers as `cpcgw-dmz-client`, whichever
 | `c3-sr-basic`, `cpcgw-dmz-sr-credentials` | both | step scripts | LDAP logins for C3 and the Gateway |
 | `aws-kms-role-params` | `gateway` | `dmz/01-gateway/kms-irsa.yaml` | IAM role the encryption executors assume |
 | `grafana-admin` | `monitoring` | `dmz/03-monitoring/deploy.sh` | Grafana admin password |
-
-Every generated value has a local copy in `.secrets/` so steps can be re-run without rotating anything.
+| `internal-client` | `clients` (core) | `clients/internal-client/deploy.sh` | trust store, key stores and configs for the in-cluster client |
 
 ## Schema linking
 
@@ -72,6 +93,8 @@ core SR (writable, private) --exporter dmz-readonly, all subjects, same IDs--> r
 The followers join the read-only cluster through its Kafka topic `_schemas_schemaregistry-ro_confluent` and group
 `id_schemaregistry-ro_confluent`. They have no DEK registry and no exporter API, so keys never reach the DMZ. Writes
 sent to them are forwarded to the leader, where users only hold read roles and IMPORT mode admits only the exporter.
+Users without write roles get 403. An administrator's write is also refused, but because the leader's rejection comes
+back through the follower, it shows as HTTP 500 rather than 422. Sync is unaffected.
 
 ## Gateway configuration notes
 

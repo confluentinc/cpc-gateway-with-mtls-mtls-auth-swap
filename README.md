@@ -43,8 +43,11 @@ with Terraform outputs such as the KMS key and IAM role ARNs).
 ./setup.sh --from dmz-platform
 ```
 
-Generated passwords, the MDS token key pair and client key stores go to `.secrets/` (git-ignored). Kubectl contexts
-are named after the clusters (`kubectl --context <CORE_CLUSTER>`).
+You supply only `config.env` and the license. Every other credential (LDAP passwords, the MDS token key pair, client
+key stores) is generated into `.secrets/` (git-ignored) on first run, reused on re-runs, and turned into Kubernetes
+Secrets by the step scripts; certificates come from cert-manager. The file-to-Secret map and how to bring your own are
+in [docs/architecture.md](docs/architecture.md#secrets). Kubectl contexts are named after the clusters
+(`kubectl --context <CORE_CLUSTER>`).
 
 ## Check
 
